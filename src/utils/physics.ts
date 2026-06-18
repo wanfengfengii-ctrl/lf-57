@@ -8,6 +8,10 @@ import type {
   GoalConfig,
   GrainType,
   ProcessingGoal,
+  EnvironmentParams,
+  EnvironmentPresetId,
+  EnvironmentPreset,
+  EnvironmentModifiers,
 } from '../types';
 
 export const GRAIN_CONFIGS: Record<GrainType, GrainConfig> = {
@@ -487,4 +491,121 @@ export function validatePhysicsParams(
   }
 
   return { valid: true };
+}
+
+export const DEFAULT_ENVIRONMENT: EnvironmentParams = {
+  humidity: 50,
+  grainMoisture: 14,
+  pedalWear: 0,
+  groundStability: 100,
+  presetId: 'sunny',
+};
+
+export const ENVIRONMENT_PRESETS: Record<EnvironmentPresetId, EnvironmentPreset> = {
+  sunny: {
+    id: 'sunny',
+    name: '晴天晾晒',
+    icon: '☀️',
+    description: '干燥晴朗，谷物含水率低，踏板和地面状态良好',
+    params: { humidity: 30, grainMoisture: 12, pedalWear: 5, groundStability: 95 },
+  },
+  postRain: {
+    id: 'postRain',
+    name: '雨后潮湿',
+    icon: '🌧️',
+    description: '空气与谷物含水量高，踏板湿滑，地面松软不稳',
+    params: { humidity: 85, grainMoisture: 22, pedalWear: 10, groundStability: 55 },
+  },
+  highIntensity: {
+    id: 'highIntensity',
+    name: '高强度连续作业',
+    icon: '🔥',
+    description: '长时间作业导致踏板严重磨损，地面被反复踩踏后不稳',
+    params: { humidity: 55, grainMoisture: 16, pedalWear: 65, groundStability: 40 },
+  },
+  dusty: {
+    id: 'dusty',
+    name: '干燥扬尘',
+    icon: '💨',
+    description: '极度干燥环境，谷物过干易碎，踏板干涩摩擦大',
+    params: { humidity: 15, grainMoisture: 8, pedalWear: 25, groundStability: 80 },
+  },
+  custom: {
+    id: 'custom',
+    name: '自定义',
+    icon: '🔧',
+    description: '自由调整各项环境参数',
+    params: { humidity: 50, grainMoisture: 14, pedalWear: 0, groundStability: 100 },
+  },
+};
+
+export function calculateEnvironmentModifiers(env: EnvironmentParams): EnvironmentModifiers {
+  const humidityFactor = env.humidity / 100;
+  const moistureFactor = env.grainMoisture / 30;
+  const wearFactor = env.pedalWear / 100;
+  const stabilityFactor = env.groundStability / 100;
+
+  const impactHeightMultiplier =
+    1.0
+    - humidityFactor * 0.08
+    - wearFactor * 0.20
+    - (1 - stabilityFactor) * 0.12;
+
+  const hullingEfficiencyMultiplier =
+    1.0
+    - humidityFactor * 0.12
+    - moistureFactor * 0.15
+    - wearFactor * 0.10
+    - (1 - stabilityFactor) * 0.08;
+
+  const breakageRateMultiplier =
+    1.0
+    + moistureFactor * 0.25
+    + (1 - stabilityFactor) * 0.15
+    + Math.max(0, (env.grainMoisture - 20) / 10) * 0.20;
+
+  const staminaConsumptionMultiplier =
+    1.0
+    + humidityFactor * 0.15
+    + wearFactor * 0.20
+    + (1 - stabilityFactor) * 0.18;
+
+  return {
+    impactHeightMultiplier: Math.max(0.3, impactHeightMultiplier),
+    hullingEfficiencyMultiplier: Math.max(0.3, hullingEfficiencyMultiplier),
+    breakageRateMultiplier: Math.max(0.5, breakageRateMultiplier),
+    staminaConsumptionMultiplier: Math.max(0.5, staminaConsumptionMultiplier),
+  };
+}
+
+export function applyEnvironmentToHuskRate(
+  baseHuskRate: number,
+  env: EnvironmentParams
+): number {
+  const mods = calculateEnvironmentModifiers(env);
+  return Math.max(0, Math.min(1, baseHuskRate * mods.hullingEfficiencyMultiplier));
+}
+
+export function applyEnvironmentToBreakageRate(
+  baseBreakageRate: number,
+  env: EnvironmentParams
+): number {
+  const mods = calculateEnvironmentModifiers(env);
+  return Math.max(0, Math.min(1, baseBreakageRate * mods.breakageRateMultiplier));
+}
+
+export function applyEnvironmentToImpactHeight(
+  baseHeight: number,
+  env: EnvironmentParams
+): number {
+  const mods = calculateEnvironmentModifiers(env);
+  return Math.max(0, baseHeight * mods.impactHeightMultiplier);
+}
+
+export function applyEnvironmentToStaminaCost(
+  baseStaminaCost: number,
+  env: EnvironmentParams
+): number {
+  const mods = calculateEnvironmentModifiers(env);
+  return baseStaminaCost * mods.staminaConsumptionMultiplier;
 }

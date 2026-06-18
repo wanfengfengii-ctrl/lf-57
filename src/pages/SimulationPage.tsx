@@ -17,7 +17,9 @@ import { ModeSelector } from '../components/ModeSelector';
 import { RecordList } from '../components/RecordList';
 import { GrainSelector } from '../components/GrainSelector';
 import { GrainMetrics } from '../components/GrainMetrics';
+import { EnvironmentPanel } from '../components/EnvironmentPanel';
 import { useSimulationStore } from '../store/simulationStore';
+import type { EnvironmentPresetId } from '../types';
 
 export function SimulationPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -57,6 +59,8 @@ export function SimulationPage() {
     setTotalStaminaBudget,
     setGrainType,
     setProcessingGoal,
+    setEnvironment,
+    setEnvironmentPreset,
   } = useSimulation(canvasRef);
 
   const errors = getValidationErrors();
@@ -123,6 +127,16 @@ export function SimulationPage() {
                 processingGoal={params.processingGoal}
                 onGrainChange={setGrainType}
                 onGoalChange={setProcessingGoal}
+                disabled={state.isRunning && !state.isPaused}
+              />
+            </Box>
+
+            <Box mt="lg">
+              <EnvironmentPanel
+                environment={params.environment || { humidity: 50, grainMoisture: 14, pedalWear: 0, groundStability: 100, presetId: 'sunny' }}
+                params={params}
+                onEnvironmentChange={setEnvironment}
+                onPresetChange={(presetId: EnvironmentPresetId) => setEnvironmentPreset(presetId)}
                 disabled={state.isRunning && !state.isPaused}
               />
             </Box>
@@ -201,6 +215,7 @@ export function SimulationPage() {
                   processingGoal={params.processingGoal}
                   steppers={params.multiPerson?.steppers || []}
                   allRecords={records}
+                  environment={params.environment}
                 />
               </Tabs.Panel>
 

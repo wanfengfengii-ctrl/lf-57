@@ -6,6 +6,7 @@ import type {
   CooperationStrategy,
   MultiPersonParams,
 } from '../types';
+import { DEFAULT_ENVIRONMENT } from './physics';
 
 const STEPPER_COLORS = ['#8B5A2B', '#2E8B57', '#4169E1'];
 const STEPPER_NAMES = ['一号', '二号', '三号'];
@@ -204,6 +205,7 @@ export function getDefaultParams(): SimulationParams {
     grainType: 'rice',
     processingGoal: 'balanced',
     multiPerson: getDefaultMultiPersonParams(1, 'alternating'),
+    environment: { ...DEFAULT_ENVIRONMENT },
   };
 }
 

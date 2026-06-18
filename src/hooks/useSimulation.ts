@@ -12,6 +12,8 @@ import type {
   StepperConfig,
   GrainType,
   ProcessingGoal,
+  EnvironmentParams,
+  EnvironmentPresetId,
 } from '../types';
 
 export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
@@ -42,6 +44,8 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     setTotalStaminaBudget,
     setGrainType,
     setProcessingGoal,
+    setEnvironment,
+    setEnvironmentPreset,
   } = useSimulationStore();
 
   const lastRecordTimeRef = useRef<number>(0);
@@ -180,5 +184,7 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     setTotalStaminaBudget,
     setGrainType,
     setProcessingGoal,
+    setEnvironment,
+    setEnvironmentPreset,
   };
 }

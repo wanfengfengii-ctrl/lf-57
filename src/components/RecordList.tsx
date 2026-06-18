@@ -14,7 +14,7 @@ import {
   Checkbox,
   Divider,
 } from '@mantine/core';
-import { Trash2, Play, History, Users, Filter, GitCompare, Zap, Wheat, Target } from 'lucide-react';
+import { Trash2, Play, History, Users, Filter, GitCompare, Zap, Wheat, Target, Globe } from 'lucide-react';
 import {
   ComposedChart,
   Area,
@@ -34,9 +34,9 @@ import {
   PolarRadiusAxis,
   Radar,
 } from 'recharts';
-import type { ExperimentRecord, ParticipantCount, CooperationStrategy, GrainType, ProcessingGoal } from '../types';
+import type { ExperimentRecord, ParticipantCount, CooperationStrategy, GrainType, ProcessingGoal, EnvironmentPresetId } from '../types';
 import { getStrategyName } from '../utils/validation';
-import { GRAIN_CONFIGS, GOAL_CONFIGS } from '../utils/physics';
+import { GRAIN_CONFIGS, GOAL_CONFIGS, ENVIRONMENT_PRESETS } from '../utils/physics';
 
 interface RecordListProps {
   records: ExperimentRecord[];
@@ -72,6 +72,7 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
   const [filterStrategy, setFilterStrategy] = useState<CooperationStrategy | 'all'>('all');
   const [filterGrain, setFilterGrain] = useState<GrainType | 'all'>('all');
   const [filterGoal, setFilterGoal] = useState<ProcessingGoal | 'all'>('all');
+  const [filterEnvPreset, setFilterEnvPreset] = useState<EnvironmentPresetId | 'all'>('all');
   const [compareMode, setCompareMode] = useState(false);
   const [compareIds, setCompareIds] = useState<string[]>([]);
 
@@ -89,9 +90,14 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
       if (filterGoal !== 'all' && r.processingGoal !== filterGoal) {
         return false;
       }
+      if (filterEnvPreset !== 'all') {
+        if (!r.environment || r.environment.presetId !== filterEnvPreset) {
+          return false;
+        }
+      }
       return true;
     });
-  }, [records, filterParticipants, filterStrategy, filterGrain, filterGoal]);
+  }, [records, filterParticipants, filterStrategy, filterGrain, filterGoal, filterEnvPreset]);
 
   const compareRecords = useMemo(() => {
     return records.filter((r) => compareIds.includes(r.id));
@@ -161,6 +167,61 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
   };
 
   const radarColors = ['#8B5A2B', '#2E8B57', '#4169E1', '#CD5C5C'];
+
+  const envCompareData = useMemo(() => {
+    if (compareRecords.length === 0) return { qualityData: [], staminaData: [], efficiencyCurves: [] };
+
+    const qualityData = compareRecords.map((r, i) => {
+      const effectiveRate = r.totalStrikes > 0 ? (r.effectiveStrikes / r.totalStrikes) * 100 : 0;
+      const grainName = r.grainType ? GRAIN_CONFIGS[r.grainType]?.name : '';
+      const envLabel = r.environment
+        ? `${ENVIRONMENT_PRESETS[r.environment.presetId]?.icon || ''}${ENVIRONMENT_PRESETS[r.environment.presetId]?.name || ''}`
+        : '无';
+      return {
+        name: `${grainName}${r.participantCount}人`,
+        环境: envLabel,
+        完整率: r.finalIntegrityRate || 100,
+        破损率: r.finalBreakageRate || 0,
+        有效率: effectiveRate,
+        color: radarColors[i] || '#8B5A2B',
+      };
+    });
+
+    const staminaData = compareRecords.map((r, i) => {
+      const grainName = r.grainType ? GRAIN_CONFIGS[r.grainType]?.name : '';
+      const envLabel = r.environment
+        ? `${ENVIRONMENT_PRESETS[r.environment.presetId]?.icon || ''}${ENVIRONMENT_PRESETS[r.environment.presetId]?.name || ''}`
+        : '无';
+      return {
+        name: `${grainName}${r.participantCount}人`,
+        环境: envLabel,
+        体力收益: r.staminaYieldRatio || 0,
+        体力消耗: r.totalStaminaUsed || 0,
+        成米产量: r.riceYield || 0,
+        color: radarColors[i] || '#8B5A2B',
+      };
+    });
+
+    const maxLen = Math.max(...compareRecords.map((r) => r.efficiencyHistory?.length || 0), 0);
+    const efficiencyCurves: any[] = [];
+    for (let idx = 0; idx < maxLen; idx++) {
+      const point: any = {};
+      compareRecords.forEach((r, i) => {
+        const ep = r.efficiencyHistory?.[idx];
+        if (ep) {
+          const grainName = r.grainType ? GRAIN_CONFIGS[r.grainType]?.name : '';
+          const key = `${grainName}${r.participantCount}人`;
+          point[`${key}_eff`] = ep.effectiveRate;
+          point[`${key}_yield`] = ep.yieldPerHour;
+        }
+      });
+      const refPoint = compareRecords[0]?.efficiencyHistory?.[idx];
+      if (refPoint) point.time = refPoint.time;
+      if (Object.keys(point).length > 0) efficiencyCurves.push(point);
+    }
+
+    return { qualityData, staminaData, efficiencyCurves };
+  }, [compareRecords]);
 
   return (
     <>
@@ -273,6 +334,27 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                 ]}
                 size="xs"
                 color="bamboo"
+              />
+            </Group>
+            <Group gap="xs" wrap="wrap">
+              <Group gap="xs">
+                <Globe size={12} color="#4169E1" />
+                <Text size="xs" fw={500} c="wood.7">环境:</Text>
+              </Group>
+              <SegmentedControl
+                value={String(filterEnvPreset)}
+                onChange={(v) => setFilterEnvPreset(v === 'all' ? 'all' : (v as EnvironmentPresetId))}
+                data={[
+                  { label: '全部', value: 'all' },
+                  ...Object.values(ENVIRONMENT_PRESETS)
+                    .filter((p) => p.id !== 'custom')
+                    .map((p) => ({
+                      label: `${p.icon}${p.name}`,
+                      value: p.id,
+                    })),
+                ]}
+                size="xs"
+                color="blue"
               />
             </Group>
           </Stack>
@@ -396,6 +478,15 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                               variant="light"
                             >
                               {record.challengeSuccess ? '✓' : '✗'}
+                            </Badge>
+                          )}
+                          {record.environment && (
+                            <Badge
+                              size="xs"
+                              color="wood"
+                              variant="light"
+                            >
+                              {ENVIRONMENT_PRESETS[record.environment.presetId]?.icon} {ENVIRONMENT_PRESETS[record.environment.presetId]?.name}
                             </Badge>
                           )}
                         </Group>
@@ -649,6 +740,149 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                 </Box>
               </ScrollArea>
             </Box>
+
+            <Box p="md" style={{ backgroundColor: '#F0F8FF', borderRadius: '8px', border: '1px solid #4169E133' }}>
+              <Text size="sm" fw={600} c="#4169E1" mb="sm">
+                🌍 环境条件对比
+              </Text>
+              <Group grow mb="sm">
+                {compareRecords.map((r, i) => {
+                  const envLabel = r.environment
+                    ? `${ENVIRONMENT_PRESETS[r.environment.presetId]?.icon || ''} ${ENVIRONMENT_PRESETS[r.environment.presetId]?.name || ''}`
+                    : '未设置';
+                  return (
+                    <Box
+                      key={r.id}
+                      p="xs"
+                      style={{
+                        backgroundColor: `${radarColors[i]}11`,
+                        border: `1px solid ${radarColors[i]}44`,
+                        borderRadius: '6px',
+                      }}
+                    >
+                      <Text size="xs" fw={600} c={radarColors[i]} mb="xs">
+                        {i + 1}. {r.participantCount}人{getStrategyName(r.cooperationStrategy)}
+                      </Text>
+                      <Stack gap={2}>
+                        <Group justify="space-between">
+                          <Text size="xs" c="wood.5">环境场景</Text>
+                          <Text size="xs" fw={600} c="wood.7">{envLabel}</Text>
+                        </Group>
+                        {r.environment && (
+                          <>
+                            <Group justify="space-between">
+                              <Text size="xs" c="wood.5">湿度</Text>
+                              <Text size="xs" fw={500} c="#4169E1">{r.environment.humidity}%</Text>
+                            </Group>
+                            <Group justify="space-between">
+                              <Text size="xs" c="wood.5">含水率</Text>
+                              <Text size="xs" fw={500} c="#DAA520">{r.environment.grainMoisture}%</Text>
+                            </Group>
+                            <Group justify="space-between">
+                              <Text size="xs" c="wood.5">磨损</Text>
+                              <Text size="xs" fw={500} c="#CD5C5C">{r.environment.pedalWear}%</Text>
+                            </Group>
+                            <Group justify="space-between">
+                              <Text size="xs" c="wood.5">稳定性</Text>
+                              <Text size="xs" fw={500} c="#2E8B57">{r.environment.groundStability}%</Text>
+                            </Group>
+                          </>
+                        )}
+                      </Stack>
+                    </Box>
+                  );
+                })}
+              </Group>
+            </Box>
+
+            <Box p="md" style={{ backgroundColor: '#FAF6E8', borderRadius: '8px' }}>
+              <Text size="sm" fw={600} c="wood.7" mb="sm">
+                📈 效率曲线对比
+              </Text>
+              <Box h={200}>
+                {envCompareData.efficiencyCurves.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={envCompareData.efficiencyCurves} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                      <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                      <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#8B5A2B' }} domain={[0, 100]} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                      <Tooltip contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px' }} />
+                      <Legend wrapperStyle={{ fontSize: '10px' }} />
+                      {compareRecords.map((r, i) => {
+                        const grainName = r.grainType ? GRAIN_CONFIGS[r.grainType]?.name : '';
+                        const key = `${grainName}${r.participantCount}人`;
+                        const envLabel = r.environment
+                          ? ENVIRONMENT_PRESETS[r.environment.presetId]?.name || ''
+                          : '';
+                        return (
+                          <Line
+                            key={`${r.id}_eff`}
+                            yAxisId="left"
+                            type="monotone"
+                            dataKey={`${key}_eff`}
+                            name={`${envLabel || key} 有效率(%)`}
+                            stroke={radarColors[i]}
+                            strokeWidth={2}
+                            dot={{ r: 2 }}
+                          />
+                        );
+                      })}
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Stack h="100%" align="center" justify="center">
+                    <Text size="xs" c="wood.5">暂无效率曲线数据</Text>
+                  </Stack>
+                )}
+              </Box>
+            </Box>
+
+            <Group grow>
+              <Box p="md" style={{ backgroundColor: '#FFE4D6', borderRadius: '8px' }}>
+                <Text size="sm" fw={600} c="wood.7" mb="sm">
+                  💎 加工质量对比
+                </Text>
+                <Box h={160}>
+                  {envCompareData.qualityData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={envCompareData.qualityData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                        <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                        <YAxis tick={{ fontSize: 9, fill: '#8B5A2B' }} domain={[0, 100]} />
+                        <Tooltip contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px', fontSize: '11px' }} />
+                        <Legend wrapperStyle={{ fontSize: '9px' }} />
+                        <Bar dataKey="完整率" name="完整率(%)" fill="#2E8B57" radius={[2, 2, 0, 0]} />
+                        <Bar dataKey="破损率" name="破损率(%)" fill="#CD5C5C" radius={[2, 2, 0, 0]} />
+                        <Bar dataKey="有效率" name="有效率(%)" fill="#DAA520" radius={[2, 2, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : null}
+                </Box>
+              </Box>
+
+              <Box p="md" style={{ backgroundColor: '#E6EEFA', borderRadius: '8px' }}>
+                <Text size="sm" fw={600} c="#4169E1" mb="sm">
+                  ⚡ 单位体力收益对比
+                </Text>
+                <Box h={160}>
+                  {envCompareData.staminaData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={envCompareData.staminaData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                        <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                        <YAxis tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                        <Tooltip contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px', fontSize: '11px' }} />
+                        <Legend wrapperStyle={{ fontSize: '9px' }} />
+                        <Bar dataKey="体力收益" name="体力收益(g/千点)" fill="#4169E1" radius={[2, 2, 0, 0]} />
+                        <Bar dataKey="体力消耗" name="体力消耗" fill="#CD5C5C" radius={[2, 2, 0, 0]} />
+                        <Bar dataKey="成米产量" name="成米产量(kg)" fill="#2E8B57" radius={[2, 2, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : null}
+                </Box>
+              </Box>
+            </Group>
           </Stack>
         ) : selectedRecord && (
           <Stack gap="md">
@@ -751,6 +985,40 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                 </Box>
               )}
             </Group>
+
+            {selectedRecord.environment && (
+              <Box p="md" style={{ backgroundColor: '#FAF6E8', borderRadius: '8px' }}>
+                <Text size="sm" fw={500} c="wood.7" mb="sm">
+                  🌍 环境条件
+                </Text>
+                <Stack gap={4}>
+                  <Group justify="space-between">
+                    <Text size="xs" c="wood.5">场景预设</Text>
+                    <Badge size="xs" color="wood" variant="light">
+                      {ENVIRONMENT_PRESETS[selectedRecord.environment.presetId]?.icon} {ENVIRONMENT_PRESETS[selectedRecord.environment.presetId]?.name}
+                    </Badge>
+                  </Group>
+                  <Group grow>
+                    <Box>
+                      <Text size="xs" c="wood.5">湿度</Text>
+                      <Text size="sm" fw={600} c="#4169E1">{selectedRecord.environment.humidity}%</Text>
+                    </Box>
+                    <Box>
+                      <Text size="xs" c="wood.5">含水率</Text>
+                      <Text size="sm" fw={600} c="#DAA520">{selectedRecord.environment.grainMoisture}%</Text>
+                    </Box>
+                    <Box>
+                      <Text size="xs" c="wood.5">磨损</Text>
+                      <Text size="sm" fw={600} c="#CD5C5C">{selectedRecord.environment.pedalWear}%</Text>
+                    </Box>
+                    <Box>
+                      <Text size="xs" c="wood.5">稳定性</Text>
+                      <Text size="sm" fw={600} c="#2E8B57">{selectedRecord.environment.groundStability}%</Text>
+                    </Box>
+                  </Group>
+                </Stack>
+              </Box>
+            )}
 
             {selectedRecord.perPersonStats && selectedRecord.perPersonStats.length > 0 && (
               <Box p="md" style={{ backgroundColor: '#E6EEFA', borderRadius: '8px' }}>

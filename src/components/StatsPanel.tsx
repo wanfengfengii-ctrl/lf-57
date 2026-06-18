@@ -20,8 +20,8 @@ import {
   PolarRadiusAxis,
   Radar,
 } from 'recharts';
-import type { EfficiencyPoint, SimulationState, StepperState, ExperimentRecord, GrainType, ProcessingGoal, StepperConfig } from '../types';
-import { calculateEffectiveRate, calculateStaminaEfficiency, GRAIN_CONFIGS, GOAL_CONFIGS } from '../utils/physics';
+import type { EfficiencyPoint, SimulationState, StepperState, ExperimentRecord, GrainType, ProcessingGoal, StepperConfig, EnvironmentParams } from '../types';
+import { calculateEffectiveRate, calculateStaminaEfficiency, GRAIN_CONFIGS, GOAL_CONFIGS, ENVIRONMENT_PRESETS, calculateEnvironmentModifiers } from '../utils/physics';
 import { getStrategyName } from '../utils/validation';
 
 interface StatsPanelProps {
@@ -36,6 +36,7 @@ interface StatsPanelProps {
   processingGoal: ProcessingGoal;
   steppers: StepperConfig[];
   allRecords?: ExperimentRecord[];
+  environment?: EnvironmentParams;
 }
 
 function CustomTooltip({ active, payload, label }: any) {
@@ -77,6 +78,7 @@ export function StatsPanel({
   processingGoal,
   steppers,
   allRecords = [],
+  environment,
 }: StatsPanelProps) {
   const grain = GRAIN_CONFIGS[grainType];
   const goal = GOAL_CONFIGS[processingGoal];
@@ -170,6 +172,11 @@ export function StatsPanel({
                 ● 实时更新中
               </Text>
             )}
+            {environment && (
+              <Badge color="wood" variant="light" size="sm">
+                {ENVIRONMENT_PRESETS[environment.presetId]?.icon} {ENVIRONMENT_PRESETS[environment.presetId]?.name}
+              </Badge>
+            )}
           </Group>
         </Group>
 
@@ -183,6 +190,7 @@ export function StatsPanel({
             <Tabs.Tab value="strikes" size="sm">冲击统计</Tabs.Tab>
             <Tabs.Tab value="yield" size="sm">产量趋势</Tabs.Tab>
             <Tabs.Tab value="compare" size="sm">对比分析</Tabs.Tab>
+            <Tabs.Tab value="environment" size="sm">🌍 环境</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="efficiency" pt="md">
@@ -811,6 +819,378 @@ export function StatsPanel({
                   </Text>
                 </Box>
               </Group>
+            </Stack>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="environment" pt="md">
+            <Stack gap="md">
+              {environment ? (
+                <>
+                  <Box
+                    p="sm"
+                    style={{
+                      backgroundColor: '#FAF6E8',
+                      borderRadius: '6px',
+                      border: '1px solid #D4B88C',
+                    }}
+                  >
+                    <Group justify="space-between" mb="xs">
+                      <Text size="xs" fw={600} c="wood.7">
+                        🌍 当前环境条件
+                      </Text>
+                      <Badge color="bamboo" variant="light" size="xs">
+                        {ENVIRONMENT_PRESETS[environment.presetId]?.icon} {ENVIRONMENT_PRESETS[environment.presetId]?.name}
+                      </Badge>
+                    </Group>
+                    <Group grow>
+                      <Box p="xs" style={{ backgroundColor: '#E6EEFA', borderRadius: '4px' }}>
+                        <Text size="xs" c="wood.5" ta="center">湿度</Text>
+                        <Text size="sm" fw={600} c="#4169E1" ta="center">{environment.humidity}%</Text>
+                      </Box>
+                      <Box p="xs" style={{ backgroundColor: '#F5E6CC', borderRadius: '4px' }}>
+                        <Text size="xs" c="wood.5" ta="center">含水率</Text>
+                        <Text size="sm" fw={600} c="#DAA520" ta="center">{environment.grainMoisture}%</Text>
+                      </Box>
+                      <Box p="xs" style={{ backgroundColor: '#FFE4D6', borderRadius: '4px' }}>
+                        <Text size="xs" c="wood.5" ta="center">磨损</Text>
+                        <Text size="sm" fw={600} c="#CD5C5C" ta="center">{environment.pedalWear}%</Text>
+                      </Box>
+                      <Box p="xs" style={{ backgroundColor: '#D4EFDF', borderRadius: '4px' }}>
+                        <Text size="xs" c="wood.5" ta="center">稳定性</Text>
+                        <Text size="sm" fw={600} c="#2E8B57" ta="center">{environment.groundStability}%</Text>
+                      </Box>
+                    </Group>
+                  </Box>
+
+                  {(() => {
+                    const mods = calculateEnvironmentModifiers(environment);
+                    const envCompareRecords = allRecords.filter((r) => r.environment);
+                    const presetGroups: Record<string, ExperimentRecord[]> = {};
+                    envCompareRecords.forEach((r) => {
+                      const pid = r.environment!.presetId;
+                      if (!presetGroups[pid]) presetGroups[pid] = [];
+                      presetGroups[pid].push(r);
+                    });
+
+                    const presetAvg = Object.entries(presetGroups).map(([pid, recs]) => {
+                      const avgEffRate = recs.reduce((s, r) => s + (r.effectiveStrikes / Math.max(1, r.totalStrikes)) * 100, 0) / recs.length;
+                      const avgYield = recs.reduce((s, r) => s + (r.finalYield / Math.max(1, r.duration)) * 3600, 0) / recs.length;
+                      const avgIntegrity = recs.reduce((s, r) => s + (r.finalIntegrityRate || 100), 0) / recs.length;
+                      const avgStaminaRatio = recs.reduce((s, r) => s + (r.staminaYieldRatio || 0), 0) / recs.length;
+                      const avgBreakage = recs.reduce((s, r) => s + (r.finalBreakageRate || 0), 0) / recs.length;
+                      const avgRiceYield = recs.reduce((s, r) => s + (r.riceYield || 0), 0) / recs.length;
+                      const avgStaminaUsed = recs.reduce((s, r) => s + (r.totalStaminaUsed || 0), 0) / recs.length;
+                      const preset = ENVIRONMENT_PRESETS[pid as keyof typeof ENVIRONMENT_PRESETS];
+                      return {
+                        name: preset ? `${preset.icon}${preset.name}` : pid,
+                        有效率: avgEffRate,
+                        时产量: avgYield,
+                        完整率: avgIntegrity,
+                        体力收益: avgStaminaRatio,
+                        破损率: avgBreakage,
+                        成米产量: avgRiceYield,
+                        体力消耗: avgStaminaUsed,
+                      };
+                    });
+
+                    const envPresetColors: Record<string, string> = {
+                      sunny: '#DAA520',
+                      postRain: '#4169E1',
+                      highIntensity: '#CD5C5C',
+                      dusty: '#8B5A2B',
+                      custom: '#8B5A2B',
+                    };
+
+                    const presetEfficiencyCurves = (() => {
+                      const curves: any[] = [];
+                      Object.entries(presetGroups).forEach(([pid, recs]) => {
+                        const allPoints: { time: number; effectiveRate: number; yieldPerHour: number; integrityRate: number; breakageRate: number; staminaYieldRatio: number }[] = [];
+                        recs.forEach((r) => {
+                          if (r.efficiencyHistory) {
+                            r.efficiencyHistory.forEach((p) => {
+                              allPoints.push({
+                                time: p.time,
+                                effectiveRate: p.effectiveRate,
+                                yieldPerHour: p.yieldPerHour,
+                                integrityRate: p.integrityRate ?? 100,
+                                breakageRate: p.breakageRate ?? 0,
+                                staminaYieldRatio: p.staminaYieldRatio ?? 0,
+                              });
+                            });
+                          }
+                        });
+                        const sorted = allPoints.sort((a, b) => a.time - b.time);
+                        const sampled = sorted.filter((_, idx) => idx % Math.max(1, Math.floor(sorted.length / 20)) === 0 || idx === sorted.length - 1);
+                        const preset = ENVIRONMENT_PRESETS[pid as keyof typeof ENVIRONMENT_PRESETS];
+                        const color = envPresetColors[pid] || '#8B5A2B';
+                        const label = preset ? preset.name : pid;
+                        curves.push({ pid, label, color, points: sampled });
+                      });
+                      return curves;
+                    })();
+
+                    const maxCurveLen = Math.max(...presetEfficiencyCurves.map((c) => c.points.length), 0);
+                    const overlayData: any[] = [];
+                    for (let idx = 0; idx < maxCurveLen; idx++) {
+                      const point: any = {};
+                      presetEfficiencyCurves.forEach((curve) => {
+                        const p = curve.points[idx];
+                        if (p) {
+                          point[`${curve.label}_eff`] = p.effectiveRate;
+                          point[`${curve.label}_integrity`] = p.integrityRate;
+                          point[`${curve.label}_stamina`] = p.staminaYieldRatio;
+                        }
+                      });
+                      const refPoint = presetEfficiencyCurves[0]?.points[idx];
+                      if (refPoint) point.time = refPoint.time;
+                      if (Object.keys(point).length > 0) overlayData.push(point);
+                    }
+
+                    return (
+                      <>
+                        <Box>
+                          <Text size="xs" fw={500} c="wood.7" mb="xs">
+                            📊 环境影响倍率
+                          </Text>
+                          <Group grow>
+                            <Box p="xs" style={{ backgroundColor: '#F5E6CC', borderRadius: '4px' }}>
+                              <Text size="xs" c="wood.5" ta="center">冲击高度</Text>
+                              <Text size="sm" fw={600} c={mods.impactHeightMultiplier >= 0.9 ? 'bamboo.7' : mods.impactHeightMultiplier >= 0.7 ? 'wood.7' : 'terracotta.7'} ta="center">
+                                ×{mods.impactHeightMultiplier.toFixed(2)}
+                              </Text>
+                            </Box>
+                            <Box p="xs" style={{ backgroundColor: '#D4EFDF', borderRadius: '4px' }}>
+                              <Text size="xs" c="wood.5" ta="center">脱壳效率</Text>
+                              <Text size="sm" fw={600} c={mods.hullingEfficiencyMultiplier >= 0.9 ? 'bamboo.7' : mods.hullingEfficiencyMultiplier >= 0.7 ? 'wood.7' : 'terracotta.7'} ta="center">
+                                ×{mods.hullingEfficiencyMultiplier.toFixed(2)}
+                              </Text>
+                            </Box>
+                            <Box p="xs" style={{ backgroundColor: '#FFE4D6', borderRadius: '4px' }}>
+                              <Text size="xs" c="wood.5" ta="center">破损率</Text>
+                              <Text size="sm" fw={600} c={mods.breakageRateMultiplier <= 1.1 ? 'bamboo.7' : mods.breakageRateMultiplier <= 1.3 ? 'wood.7' : 'terracotta.7'} ta="center">
+                                ×{mods.breakageRateMultiplier.toFixed(2)}
+                              </Text>
+                            </Box>
+                            <Box p="xs" style={{ backgroundColor: '#E6EEFA', borderRadius: '4px' }}>
+                              <Text size="xs" c="wood.5" ta="center">体力消耗</Text>
+                              <Text size="sm" fw={600} c={mods.staminaConsumptionMultiplier <= 1.1 ? 'bamboo.7' : mods.staminaConsumptionMultiplier <= 1.3 ? 'wood.7' : 'terracotta.7'} ta="center">
+                                ×{mods.staminaConsumptionMultiplier.toFixed(2)}
+                              </Text>
+                            </Box>
+                          </Group>
+                        </Box>
+
+                        {presetAvg.length >= 2 && (
+                          <Box>
+                            <Text size="xs" fw={500} c="wood.7" mb="xs">
+                              📋 不同环境场景效率对比
+                            </Text>
+                            <Box h={160}>
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={presetAvg} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                                  <YAxis tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                                  <Tooltip
+                                    contentStyle={{
+                                      backgroundColor: '#FBF5E6',
+                                      border: '1px solid #D4B88C',
+                                      borderRadius: '6px',
+                                      fontSize: '11px',
+                                    }}
+                                  />
+                                  <Legend wrapperStyle={{ fontSize: '9px' }} />
+                                  <Bar dataKey="有效率" name="有效率(%)" fill="#2E8B57" radius={[2, 2, 0, 0]} />
+                                  <Bar dataKey="时产量" name="时产量(kg/h)" fill="#8B5A2B" radius={[2, 2, 0, 0]} />
+                                  <Bar dataKey="完整率" name="完整率(%)" fill="#228B22" radius={[2, 2, 0, 0]} />
+                                  <Bar dataKey="体力收益" name="体力收益" fill="#4169E1" radius={[2, 2, 0, 0]} />
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          </Box>
+                        )}
+
+                        {presetAvg.length >= 2 && (
+                          <Group grow>
+                            <Box>
+                              <Text size="xs" fw={500} c="wood.7" mb="xs">
+                                💎 加工质量差异
+                              </Text>
+                              <Box h={140}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <BarChart data={presetAvg} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                                    <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                                    <YAxis tick={{ fontSize: 9, fill: '#8B5A2B' }} domain={[0, 100]} />
+                                    <Tooltip contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px', fontSize: '11px' }} />
+                                    <Legend wrapperStyle={{ fontSize: '9px' }} />
+                                    <Bar dataKey="完整率" name="完整率(%)" fill="#2E8B57" radius={[2, 2, 0, 0]} />
+                                    <Bar dataKey="破损率" name="破损率(%)" fill="#CD5C5C" radius={[2, 2, 0, 0]} />
+                                  </BarChart>
+                                </ResponsiveContainer>
+                              </Box>
+                            </Box>
+                            <Box>
+                              <Text size="xs" fw={500} c="wood.7" mb="xs">
+                                ⚡ 单位体力收益差异
+                              </Text>
+                              <Box h={140}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <BarChart data={presetAvg} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                                    <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                                    <YAxis tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                                    <Tooltip contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px', fontSize: '11px' }} />
+                                    <Legend wrapperStyle={{ fontSize: '9px' }} />
+                                    <Bar dataKey="体力收益" name="体力收益(g/千点)" fill="#4169E1" radius={[2, 2, 0, 0]} />
+                                    <Bar dataKey="体力消耗" name="体力消耗" fill="#CD5C5C" radius={[2, 2, 0, 0]} />
+                                    <Bar dataKey="成米产量" name="成米产量(kg)" fill="#2E8B57" radius={[2, 2, 0, 0]} />
+                                  </BarChart>
+                                </ResponsiveContainer>
+                              </Box>
+                            </Box>
+                          </Group>
+                        )}
+
+                        {overlayData.length > 0 && presetEfficiencyCurves.length >= 2 && (
+                          <Box>
+                            <Text size="xs" fw={500} c="wood.7" mb="xs">
+                              📈 跨环境效率曲线叠加
+                            </Text>
+                            <Box h={160}>
+                              <ResponsiveContainer width="100%" height="100%">
+                                <ComposedChart data={overlayData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                                  <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#8B5A2B' }} domain={[0, 100]} />
+                                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                                  <Tooltip content={<CustomTooltip />} />
+                                  <Legend wrapperStyle={{ fontSize: '10px' }} />
+                                  {presetEfficiencyCurves.map((curve) => (
+                                    <Line
+                                      key={`${curve.pid}_eff`}
+                                      yAxisId="left"
+                                      type="monotone"
+                                      dataKey={`${curve.label}_eff`}
+                                      name={`${curve.label} 有效率(%)`}
+                                      stroke={curve.color}
+                                      strokeWidth={2}
+                                      dot={{ r: 2 }}
+                                    />
+                                  ))}
+                                </ComposedChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          </Box>
+                        )}
+
+                        {overlayData.length > 0 && presetEfficiencyCurves.length >= 2 && (
+                          <Box>
+                            <Text size="xs" fw={500} c="wood.7" mb="xs">
+                              📈 跨环境完整率与体力收益对比
+                            </Text>
+                            <Box h={160}>
+                              <ResponsiveContainer width="100%" height="100%">
+                                <ComposedChart data={overlayData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                                  <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#8B5A2B' }} domain={[0, 100]} />
+                                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                                  <Tooltip content={<CustomTooltip />} />
+                                  <Legend wrapperStyle={{ fontSize: '10px' }} />
+                                  {presetEfficiencyCurves.map((curve) => (
+                                    <Line
+                                      key={`${curve.pid}_integrity`}
+                                      yAxisId="left"
+                                      type="monotone"
+                                      dataKey={`${curve.label}_integrity`}
+                                      name={`${curve.label} 完整率(%)`}
+                                      stroke={curve.color}
+                                      strokeWidth={2}
+                                      dot={false}
+                                      strokeDasharray="4 2"
+                                    />
+                                  ))}
+                                  {presetEfficiencyCurves.map((curve) => (
+                                    <Line
+                                      key={`${curve.pid}_stamina`}
+                                      yAxisId="right"
+                                      type="monotone"
+                                      dataKey={`${curve.label}_stamina`}
+                                      name={`${curve.label} 体力收益`}
+                                      stroke={curve.color}
+                                      strokeWidth={2}
+                                      dot={{ r: 2 }}
+                                    />
+                                  ))}
+                                </ComposedChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          </Box>
+                        )}
+
+                        {recentData.length > 0 && (
+                          <Box>
+                            <Text size="xs" fw={500} c="wood.7" mb="xs">
+                              📈 效率-环境关联曲线
+                            </Text>
+                            <Box h={140}>
+                              <ResponsiveContainer width="100%" height="100%">
+                                <ComposedChart data={recentData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                                  <XAxis
+                                    dataKey="time"
+                                    tick={{ fontSize: 10, fill: '#8B5A2B' }}
+                                    label={{ value: '时间(s)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#A67C52' }}
+                                  />
+                                  <YAxis
+                                    yAxisId="left"
+                                    tick={{ fontSize: 10, fill: '#8B5A2B' }}
+                                    domain={[0, 100]}
+                                    label={{ value: '有效率(%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: '#A67C52' }}
+                                  />
+                                  <YAxis
+                                    yAxisId="right"
+                                    orientation="right"
+                                    tick={{ fontSize: 10, fill: '#8B5A2B' }}
+                                    label={{ value: '体力收益', angle: 90, position: 'insideRight', fontSize: 10, fill: '#A67C52' }}
+                                  />
+                                  <Tooltip content={<CustomTooltip />} />
+                                  <Legend wrapperStyle={{ fontSize: '10px' }} />
+                                  <Area
+                                    yAxisId="left"
+                                    type="monotone"
+                                    dataKey="effectiveRate"
+                                    name="有效冲击率"
+                                    fill="#2E8B5733"
+                                    stroke="#2E8B57"
+                                    strokeWidth={2}
+                                  />
+                                  <Line
+                                    yAxisId="right"
+                                    type="monotone"
+                                    dataKey="staminaYieldRatio"
+                                    name="单位体力收益"
+                                    stroke="#4169E1"
+                                    strokeWidth={2}
+                                    dot={{ r: 2 }}
+                                  />
+                                </ComposedChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          </Box>
+                        )}
+                      </>
+                    );
+                  })()}
+                </>
+              ) : (
+                <Stack h="100%" align="center" justify="center">
+                  <Text size="sm" c="wood.5">
+                    设置环境条件后将显示环境分析
+                  </Text>
+                </Stack>
+              )}
             </Stack>
           </Tabs.Panel>
         </Tabs>

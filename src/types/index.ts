@@ -63,6 +63,7 @@ export interface SimulationParams {
   grainType: GrainType;
   processingGoal: ProcessingGoal;
   multiPerson?: MultiPersonParams;
+  environment?: EnvironmentParams;
 }
 
 export interface EfficiencyPoint {
@@ -77,6 +78,7 @@ export interface EfficiencyPoint {
   breakageRate?: number;
   integrityRate?: number;
   staminaYieldRatio?: number;
+  environment?: EnvironmentParams;
 }
 
 export interface SimulationState {
@@ -99,6 +101,31 @@ export interface SimulationState {
   currentBreakageRate: number;
   currentIntegrityRate: number;
   staminaYieldRatio: number;
+}
+
+export type EnvironmentPresetId = 'sunny' | 'postRain' | 'highIntensity' | 'dusty' | 'custom';
+
+export interface EnvironmentParams {
+  humidity: number;
+  grainMoisture: number;
+  pedalWear: number;
+  groundStability: number;
+  presetId: EnvironmentPresetId;
+}
+
+export interface EnvironmentPreset {
+  id: EnvironmentPresetId;
+  name: string;
+  icon: string;
+  description: string;
+  params: Omit<EnvironmentParams, 'presetId'>;
+}
+
+export interface EnvironmentModifiers {
+  impactHeightMultiplier: number;
+  hullingEfficiencyMultiplier: number;
+  breakageRateMultiplier: number;
+  staminaConsumptionMultiplier: number;
 }
 
 export type SimulationMode = 'free' | 'challenge';
@@ -158,6 +185,7 @@ export interface ExperimentRecord {
     staminaUsed: number;
     contributionRate: number;
   }[];
+  environment?: EnvironmentParams;
 }
 
 export interface ValidationResult {

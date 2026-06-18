@@ -12,6 +12,8 @@ import type {
   CooperationStrategy,
   GrainType,
   ProcessingGoal,
+  EnvironmentParams,
+  EnvironmentPresetId,
 } from '../types';
 import {
   getDefaultParams,
@@ -30,6 +32,12 @@ import {
   calculateIntegrityRate,
   calculateStaminaYieldRatio,
   calculateImpactEnergy,
+  calculateEnvironmentModifiers,
+  applyEnvironmentToHuskRate,
+  applyEnvironmentToBreakageRate,
+  applyEnvironmentToStaminaCost,
+  DEFAULT_ENVIRONMENT,
+  ENVIRONMENT_PRESETS,
   GRAIN_CONFIGS,
   DEFAULT_PHYSICS_CONFIG,
 } from '../utils/physics';
@@ -57,6 +65,8 @@ interface SimulationStore {
   setTotalStaminaBudget: (budget: number) => void;
   setGrainType: (grainType: GrainType) => void;
   setProcessingGoal: (goal: ProcessingGoal) => void;
+  setEnvironment: (env: Partial<EnvironmentParams>) => void;
+  setEnvironmentPreset: (presetId: EnvironmentPresetId) => void;
 
   start: () => void;
   pause: () => void;
@@ -313,6 +323,43 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     }
   },
 
+  setEnvironment: (env: Partial<EnvironmentParams>) => {
+    const current = get();
+    const currentEnv = current.params.environment || { ...DEFAULT_ENVIRONMENT };
+    const updatedEnv = { ...currentEnv, ...env, presetId: 'custom' as EnvironmentPresetId };
+    const updatedParams = { ...current.params, environment: updatedEnv };
+
+    if (current.state.isRunning) {
+      set({ params: updatedParams });
+    } else {
+      set({
+        params: updatedParams,
+        state: getInitialState(updatedParams),
+      });
+    }
+  },
+
+  setEnvironmentPreset: (presetId: EnvironmentPresetId) => {
+    const current = get();
+    const preset = ENVIRONMENT_PRESETS[presetId];
+    if (!preset) return;
+
+    const updatedEnv: EnvironmentParams = {
+      ...preset.params,
+      presetId,
+    };
+    const updatedParams = { ...current.params, environment: updatedEnv };
+
+    if (current.state.isRunning) {
+      set({ params: updatedParams });
+    } else {
+      set({
+        params: updatedParams,
+        state: getInitialState(updatedParams),
+      });
+    }
+  },
+
   start: () => {
     const { currentChallenge, params } = get();
     const validation = validateParams(get().params);
@@ -433,6 +480,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       breakageRate: currentBreakageRate,
       integrityRate: currentIntegrityRate,
       staminaYieldRatio,
+      environment: params.environment ? { ...params.environment } : undefined,
     };
 
     set((state) => ({
@@ -452,20 +500,28 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     dropHeight: number = 0.3
   ) => {
     const { state, params } = get();
+    const env = params.environment || DEFAULT_ENVIRONMENT;
+    const envMods = calculateEnvironmentModifiers(env);
+
+    const adjustedHuskRate = applyEnvironmentToHuskRate(huskRate, env);
 
     const newTotal = state.totalStrikes + 1;
     const newEffective = state.effectiveStrikes + (isEffective ? 1 : 0);
     const newHuskRate = isEffective
-      ? (state.currentHuskRate * state.effectiveStrikes + huskRate) / newEffective
+      ? (state.currentHuskRate * state.effectiveStrikes + adjustedHuskRate) / newEffective
       : state.currentHuskRate;
 
     const participantCount = params.multiPerson?.participantCount || 1;
     const newYield = estimateYield(newEffective, params.grainWeight, newHuskRate, participantCount, params.grainType, params.processingGoal);
 
     const impactEnergy = calculateImpactEnergy(impactVelocity);
-    const strikeBreakageRate = isEffective
+    const baseStrikeBreakageRate = isEffective
       ? calculateBreakageRate(impactEnergy, params.grainWeight, newEffective, params.grainType, params.processingGoal, dropHeight)
       : state.currentBreakageRate / 100;
+
+    const strikeBreakageRate = isEffective
+      ? applyEnvironmentToBreakageRate(baseStrikeBreakageRate, env)
+      : baseStrikeBreakageRate;
 
     const newBreakageRate = isEffective
       ? (state.currentBreakageRate * state.effectiveStrikes + strikeBreakageRate * 100) / newEffective
@@ -485,9 +541,11 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
       const newSteps = ss.totalSteps + delta.steps;
       const newContributions = ss.effectiveContributions + (isEffective && contributingSteppers.includes(ss.id) ? 1 : 0);
-      const newCurrentStamina = Math.max(0, Math.min(ss.maxStamina, delta.stamina));
-      const singleStaminaUsed = Math.max(0, ss.currentStamina - newCurrentStamina);
-      newTotalStaminaUsed += singleStaminaUsed;
+      const rawStamina = Math.max(0, Math.min(ss.maxStamina, delta.stamina));
+      const staminaDelta = Math.max(0, ss.currentStamina - rawStamina);
+      const envAdjustedStaminaDelta = applyEnvironmentToStaminaCost(staminaDelta, env);
+      const newCurrentStamina = Math.max(0, ss.currentStamina - envAdjustedStaminaDelta);
+      newTotalStaminaUsed += envAdjustedStaminaDelta;
 
       return {
         ...ss,
@@ -586,6 +644,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       finalIntegrityRate: state.currentIntegrityRate,
       staminaYieldRatio: state.staminaYieldRatio,
       perPersonStats,
+      environment: params.environment ? { ...params.environment } : undefined,
     };
 
     const newRecords = addRecord(record);
@@ -612,6 +671,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       const loadedParams = JSON.parse(JSON.stringify(record.params));
       if (!loadedParams.grainType) loadedParams.grainType = 'rice';
       if (!loadedParams.processingGoal) loadedParams.processingGoal = 'balanced';
+      if (!loadedParams.environment) loadedParams.environment = record.environment ? { ...record.environment } : { ...DEFAULT_ENVIRONMENT };
 
       set({
         params: loadedParams,
