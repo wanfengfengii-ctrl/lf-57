@@ -199,6 +199,7 @@ export function SimulationPage() {
                   cooperationStrategy={params.multiPerson?.cooperationStrategy || 'synchronized'}
                   grainType={params.grainType}
                   processingGoal={params.processingGoal}
+                  steppers={params.multiPerson?.steppers || []}
                   allRecords={records}
                 />
               </Tabs.Panel>

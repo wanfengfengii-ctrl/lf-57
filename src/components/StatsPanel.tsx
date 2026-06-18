@@ -20,7 +20,7 @@ import {
   PolarRadiusAxis,
   Radar,
 } from 'recharts';
-import type { EfficiencyPoint, SimulationState, StepperState, ExperimentRecord, GrainType, ProcessingGoal } from '../types';
+import type { EfficiencyPoint, SimulationState, StepperState, ExperimentRecord, GrainType, ProcessingGoal, StepperConfig } from '../types';
 import { calculateEffectiveRate, calculateStaminaEfficiency, GRAIN_CONFIGS, GOAL_CONFIGS } from '../utils/physics';
 import { getStrategyName } from '../utils/validation';
 
@@ -34,6 +34,7 @@ interface StatsPanelProps {
   cooperationStrategy: string;
   grainType: GrainType;
   processingGoal: ProcessingGoal;
+  steppers: StepperConfig[];
   allRecords?: ExperimentRecord[];
 }
 
@@ -74,6 +75,7 @@ export function StatsPanel({
   cooperationStrategy,
   grainType,
   processingGoal,
+  steppers,
   allRecords = [],
 }: StatsPanelProps) {
   const grain = GRAIN_CONFIGS[grainType];
@@ -92,11 +94,14 @@ export function StatsPanel({
     理论产量: (yieldPerHour * point.time) / 3600,
   }));
 
-  const staminaData = efficiencyHistory.map((point) => ({
-    time: point.time,
-    消耗体力: point.staminaUsed || 0,
-    剩余预算: Math.max(0, (state.staminaBudgetRemaining || 0) + ((efficiencyHistory[efficiencyHistory.length - 1]?.staminaUsed || 0) - (point.staminaUsed || 0))),
-  }));
+  const staminaData = efficiencyHistory.map((point) => {
+    const totalBudget = state.stepperStates.reduce((sum, s) => sum + s.maxStamina, 0) || 100;
+    return {
+      time: point.time,
+      消耗体力: point.staminaUsed || 0,
+      剩余预算: Math.max(0, totalBudget - (point.staminaUsed || 0)),
+    };
+  });
 
   const perPersonStaminaData = state.stepperStates.map((ss, i) => {
     const staminaHistory = ss.staminaHistory.slice(-30);
@@ -107,13 +112,14 @@ export function StatsPanel({
   });
 
   const perPersonContribution = state.stepperStates.map((ss, i) => {
-    const config = allRecords.length > 0 ? allRecords[0]?.params?.multiPerson?.steppers[i]?.name || `${i + 1}号` : `${i + 1}号`;
-    const color = allRecords.length > 0 ? allRecords[0]?.params?.multiPerson?.steppers[i]?.color || '#8B5A2B' : '#8B5A2B';
+    const config = steppers[i];
+    const name = config?.name || `${i + 1}号`;
+    const color = config?.color || '#8B5A2B';
     const contribution = state.effectiveStrikes > 0
       ? (ss.effectiveContributions / state.effectiveStrikes) * 100
       : 0;
     return {
-      name: config,
+      name,
       贡献占比: contribution,
       体力剩余: (ss.currentStamina / ss.maxStamina) * 100,
       color,
@@ -522,20 +528,22 @@ export function StatsPanel({
                 <Group grow>
                   {state.stepperStates.map((ss, i) => {
                     const pct = (ss.currentStamina / ss.maxStamina) * 100;
-                    const config = allRecords.length > 0 ? allRecords[0]?.params?.multiPerson?.steppers[i] : undefined;
+                    const config = steppers[i];
+                    const name = config?.name || `${i + 1}号`;
+                    const color = config?.color || '#8B5A2B';
                     return (
                       <Box
                         key={ss.id}
                         p="xs"
                         style={{
-                          backgroundColor: `${config?.color || '#8B5A2B'}15`,
+                          backgroundColor: `${color}15`,
                           borderRadius: '6px',
-                          border: `1px solid ${config?.color || '#8B5A2B'}55`,
+                          border: `1px solid ${color}55`,
                         }}
                       >
                         <Group justify="space-between" mb="xs">
-                          <Text size="xs" fw={600} c={config?.color || '#8B5A2B'}>
-                            {config?.name || `${i + 1}号`}
+                          <Text size="xs" fw={600} c={color}>
+                            {name}
                           </Text>
                           <Text size="xs" c="wood.6">
                             {Math.round(pct)}%
@@ -552,7 +560,7 @@ export function StatsPanel({
                           <Box
                             h="100%"
                             style={{
-                              backgroundColor: config?.color || '#8B5A2B',
+                              backgroundColor: color,
                               width: `${pct}%`,
                               transition: 'width 0.3s',
                             }}

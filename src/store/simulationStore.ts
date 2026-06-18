@@ -485,22 +485,24 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
       const newSteps = ss.totalSteps + delta.steps;
       const newContributions = ss.effectiveContributions + (isEffective && contributingSteppers.includes(ss.id) ? 1 : 0);
-      const staminaUsed = Math.max(0, ss.maxStamina - delta.stamina);
-      newTotalStaminaUsed += Math.max(0, delta.stamina > 0 ? 0 : -delta.stamina);
+      const newCurrentStamina = Math.max(0, Math.min(ss.maxStamina, delta.stamina));
+      const singleStaminaUsed = Math.max(0, ss.currentStamina - newCurrentStamina);
+      newTotalStaminaUsed += singleStaminaUsed;
 
       return {
         ...ss,
         totalSteps: newSteps,
-        currentStamina: Math.max(0, Math.min(ss.maxStamina, delta.stamina)),
+        currentStamina: newCurrentStamina,
         effectiveContributions: newContributions,
         staminaHistory: [
           ...ss.staminaHistory,
-          { time: state.elapsedTime, stamina: delta.stamina },
+          { time: state.elapsedTime, stamina: newCurrentStamina },
         ].slice(-120),
       };
     });
 
-    const budgetRemaining = (params.multiPerson?.totalStaminaBudget || 100) - newTotalStaminaUsed;
+    const totalBudget = params.multiPerson?.totalStaminaBudget || 100;
+    const budgetRemaining = Math.max(0, totalBudget - newTotalStaminaUsed);
     const newStaminaYieldRatio = calculateStaminaYieldRatio(newRiceYield, newTotalStaminaUsed);
 
     set((state) => ({
@@ -540,12 +542,12 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     const perPersonStats = state.stepperStates.map((ss, i) => {
       const config = params.multiPerson?.steppers[i];
-      const totalStamina = ss.maxStamina - ss.currentStamina + state.totalStaminaUsed * (1 / participantCount);
+      const staminaUsed = Math.max(0, ss.maxStamina - ss.currentStamina);
       return {
         id: ss.id,
         name: config?.name || `${i + 1}号`,
         steps: ss.totalSteps,
-        staminaUsed: totalStamina,
+        staminaUsed,
         contributionRate:
           state.effectiveStrikes > 0
             ? (ss.effectiveContributions / state.effectiveStrikes) * 100
