@@ -1,4 +1,4 @@
-import { Card, Group, Text, Stack, Box, Divider, Tabs, Badge } from '@mantine/core';
+import { Card, Group, Text, Stack, Box, Divider, Tabs, Badge, Progress } from '@mantine/core';
 import {
   LineChart,
   Line,
@@ -20,8 +20,8 @@ import {
   PolarRadiusAxis,
   Radar,
 } from 'recharts';
-import type { EfficiencyPoint, SimulationState, StepperState, ExperimentRecord } from '../types';
-import { calculateEffectiveRate, calculateStaminaEfficiency } from '../utils/physics';
+import type { EfficiencyPoint, SimulationState, StepperState, ExperimentRecord, GrainType, ProcessingGoal } from '../types';
+import { calculateEffectiveRate, calculateStaminaEfficiency, GRAIN_CONFIGS, GOAL_CONFIGS } from '../utils/physics';
 import { getStrategyName } from '../utils/validation';
 
 interface StatsPanelProps {
@@ -32,6 +32,8 @@ interface StatsPanelProps {
   staminaEfficiency: number;
   participantCount: number;
   cooperationStrategy: string;
+  grainType: GrainType;
+  processingGoal: ProcessingGoal;
   allRecords?: ExperimentRecord[];
 }
 
@@ -70,8 +72,12 @@ export function StatsPanel({
   staminaEfficiency,
   participantCount,
   cooperationStrategy,
+  grainType,
+  processingGoal,
   allRecords = [],
 }: StatsPanelProps) {
+  const grain = GRAIN_CONFIGS[grainType];
+  const goal = GOAL_CONFIGS[processingGoal];
   const recentData = efficiencyHistory.slice(-30);
 
   const strikeData = [
@@ -138,7 +144,13 @@ export function StatsPanel({
           <Text size="lg" fw={600} c="wood.7">
             📊 统计分析
           </Text>
-          <Group gap="xs">
+          <Group gap="xs" wrap="wrap">
+            <Badge color="wood" variant="light" size="sm">
+              {grain.emoji} {grain.name}
+            </Badge>
+            <Badge color="bamboo" variant="light" size="sm">
+              {goal.icon} {goal.name}
+            </Badge>
             <Badge color="wood" variant="light" size="sm">
               {participantCount}人
             </Badge>
@@ -160,6 +172,7 @@ export function StatsPanel({
         <Tabs defaultValue="efficiency" variant="pills">
           <Tabs.List grow>
             <Tabs.Tab value="efficiency" size="sm">效率曲线</Tabs.Tab>
+            <Tabs.Tab value="grain" size="sm">🌾 谷物加工</Tabs.Tab>
             <Tabs.Tab value="stamina" size="sm">体力曲线</Tabs.Tab>
             <Tabs.Tab value="strikes" size="sm">冲击统计</Tabs.Tab>
             <Tabs.Tab value="yield" size="sm">产量趋势</Tabs.Tab>
@@ -219,6 +232,248 @@ export function StatsPanel({
                 </Stack>
               )}
             </Box>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="grain" pt="md">
+            <Stack gap="md">
+              <Group grow>
+                <Box p="xs" style={{ backgroundColor: '#F5E6CC', borderRadius: '6px' }}>
+                  <Text size="xs" c="wood.5" ta="center">
+                    成米产量
+                  </Text>
+                  <Text size="lg" fw={700} c="wood.7" ta="center">
+                    {state.riceYield.toFixed(2)}
+                    <Text size="xs" span c="wood.5"> kg</Text>
+                  </Text>
+                </Box>
+                <Box p="xs" style={{ backgroundColor: '#D4EFDF', borderRadius: '6px' }}>
+                  <Text size="xs" c="wood.5" ta="center">
+                    完整率
+                  </Text>
+                  <Text
+                    size="lg"
+                    fw={700}
+                    c={state.currentIntegrityRate >= 90 ? 'bamboo.7' : state.currentIntegrityRate >= 75 ? 'wood.7' : 'terracotta.7'}
+                    ta="center"
+                  >
+                    {state.currentIntegrityRate.toFixed(1)}
+                    <Text size="xs" span c="wood.5"> %</Text>
+                  </Text>
+                </Box>
+                <Box p="xs" style={{ backgroundColor: '#FFE4D6', borderRadius: '6px' }}>
+                  <Text size="xs" c="wood.5" ta="center">
+                    破损率
+                  </Text>
+                  <Text
+                    size="lg"
+                    fw={700}
+                    c={state.currentBreakageRate <= 5 ? 'bamboo.7' : state.currentBreakageRate <= 10 ? 'wood.7' : 'terracotta.7'}
+                    ta="center"
+                  >
+                    {state.currentBreakageRate.toFixed(1)}
+                    <Text size="xs" span c="wood.5"> %</Text>
+                  </Text>
+                </Box>
+                <Box p="xs" style={{ backgroundColor: '#E6EEFA', borderRadius: '6px' }}>
+                  <Text size="xs" c="wood.5" ta="center">
+                    单位体力收益
+                  </Text>
+                  <Text size="lg" fw={700} c="blue.7" ta="center">
+                    {state.staminaYieldRatio.toFixed(1)}
+                    <Text size="xs" span c="wood.5"> g/千点</Text>
+                  </Text>
+                </Box>
+              </Group>
+
+              <Box h={160}>
+                {recentData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={recentData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                      <XAxis
+                        dataKey="time"
+                        tick={{ fontSize: 10, fill: '#8B5A2B' }}
+                        label={{ value: '时间(s)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#A67C52' }}
+                      />
+                      <YAxis
+                        yAxisId="left"
+                        tick={{ fontSize: 10, fill: '#8B5A2B' }}
+                        domain={[0, 100]}
+                        label={{ value: '完整率(%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: '#A67C52' }}
+                      />
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        tick={{ fontSize: 10, fill: '#8B5A2B' }}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: '10px' }} />
+                      <Area
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey="integrityRate"
+                        name="完整率"
+                        fill="#2E8B5733"
+                        stroke="#2E8B57"
+                        strokeWidth={2}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="breakageRate"
+                        name="破损率(%)"
+                        stroke="#CD5C5C"
+                        strokeWidth={2}
+                        dot={{ r: 2 }}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="staminaYieldRatio"
+                        name="体力收益"
+                        stroke="#4169E1"
+                        strokeWidth={2}
+                        dot={{ r: 2 }}
+                        strokeDasharray="5 5"
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Stack h="100%" align="center" justify="center">
+                    <Text size="sm" c="wood.5">
+                      启动模拟后将显示谷物加工指标曲线
+                    </Text>
+                  </Stack>
+                )}
+              </Box>
+
+              <Box
+                p="sm"
+                style={{
+                  backgroundColor: '#FAF6E8',
+                  borderRadius: '6px',
+                  border: '1px solid #D4B88C',
+                }}
+              >
+                <Group justify="space-between" mb="xs">
+                  <Text size="xs" fw={500} c="wood.7">
+                    🎯 加工目标达成
+                  </Text>
+                  <Badge
+                    size="xs"
+                    color={
+                      processingGoal === 'highYield'
+                        ? yieldPerHour >= 50
+                          ? 'bamboo'
+                          : 'wood'
+                        : processingGoal === 'lowBreakage'
+                        ? state.currentIntegrityRate >= 90
+                          ? 'bamboo'
+                          : 'terracotta'
+                        : processingGoal === 'energySaving'
+                        ? state.staminaYieldRatio >= 30
+                          ? 'bamboo'
+                          : 'wood'
+                        : state.currentIntegrityRate >= 80 && yieldPerHour >= 30
+                        ? 'bamboo'
+                        : 'wood'
+                    }
+                  >
+                    {processingGoal === 'highYield'
+                      ? yieldPerHour >= 50
+                        ? '✓ 达标'
+                        : `${(yieldPerHour / 50 * 100).toFixed(0)}%`
+                      : processingGoal === 'lowBreakage'
+                      ? state.currentIntegrityRate >= 90
+                        ? '✓ 达标'
+                        : `${(state.currentIntegrityRate / 90 * 100).toFixed(0)}%`
+                      : processingGoal === 'energySaving'
+                      ? state.staminaYieldRatio >= 30
+                        ? '✓ 达标'
+                        : `${(state.staminaYieldRatio / 30 * 100).toFixed(0)}%`
+                      : state.currentIntegrityRate >= 80 && yieldPerHour >= 30
+                      ? '✓ 达标'
+                      : `${((Math.min(100, state.currentIntegrityRate / 90 * 50) + Math.min(100, yieldPerHour / 50 * 50))).toFixed(0)}%`}
+                  </Badge>
+                </Group>
+                <Progress
+                  value={
+                    processingGoal === 'highYield'
+                      ? Math.min(100, yieldPerHour / 50 * 100)
+                      : processingGoal === 'lowBreakage'
+                      ? Math.min(100, state.currentIntegrityRate / 90 * 100)
+                      : processingGoal === 'energySaving'
+                      ? Math.min(100, state.staminaYieldRatio / 30 * 100)
+                      : Math.min(100, (Math.min(100, state.currentIntegrityRate / 90 * 50) + Math.min(100, yieldPerHour / 50 * 50)))
+                  }
+                  color={
+                    processingGoal === 'highYield'
+                      ? 'wood'
+                      : processingGoal === 'lowBreakage'
+                      ? 'bamboo'
+                      : processingGoal === 'energySaving'
+                      ? 'blue'
+                      : 'wood'
+                  }
+                  size="sm"
+                  radius="md"
+                />
+              </Box>
+
+              <Box>
+                <Text size="xs" fw={500} c="wood.7" mb="xs">
+                  冲击区间匹配
+                </Text>
+                <Group justify="space-between" mb="xs">
+                  <Text size="xs" c="wood.6">
+                    实际高度: {state.maxHeight.toFixed(2)}m
+                  </Text>
+                  <Text size="xs" c="wood.6">
+                    最佳区间: [{grain.optimalImpactMin.toFixed(2)}-{grain.optimalImpactMax.toFixed(2)}]m
+                  </Text>
+                </Group>
+                <Box
+                  h={16}
+                  style={{
+                    position: 'relative',
+                    backgroundColor: '#E8D4A8',
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <Box
+                    h="100%"
+                    style={{
+                      position: 'absolute',
+                      left: `${Math.max(0, (grain.optimalImpactMin / (grain.optimalImpactMax + 0.3)) * 100)}%`,
+                      width: `${((grain.optimalImpactMax - grain.optimalImpactMin) / (grain.optimalImpactMax + 0.3)) * 100}%`,
+                      backgroundColor: '#2E8B5766',
+                    }}
+                  />
+                  <Box
+                    h="100%"
+                    w="4px"
+                    style={{
+                      position: 'absolute',
+                      left: `${Math.min(100, Math.max(0, (state.maxHeight / (grain.optimalImpactMax + 0.3)) * 100))}%`,
+                      backgroundColor: state.maxHeight >= grain.optimalImpactMin && state.maxHeight <= grain.optimalImpactMax ? '#2E8B57' : '#CD5C5C',
+                      transform: 'translateX(-2px)',
+                    }}
+                  />
+                </Box>
+                <Group justify="space-between" mt="xs">
+                  <Badge size="xs" color="wood" variant="light">
+                    0m
+                  </Badge>
+                  <Badge size="xs" color="bamboo" variant="filled">
+                    最佳区间
+                  </Badge>
+                  <Badge size="xs" color="wood" variant="light">
+                    {(grain.optimalImpactMax + 0.3).toFixed(2)}m
+                  </Badge>
+                </Group>
+              </Box>
+            </Stack>
           </Tabs.Panel>
 
           <Tabs.Panel value="stamina" pt="md">

@@ -10,6 +10,8 @@ import type {
   StepperConfig,
   ParticipantCount,
   CooperationStrategy,
+  GrainType,
+  ProcessingGoal,
 } from '../types';
 import {
   getDefaultParams,
@@ -23,6 +25,13 @@ import {
   calculateYieldPerHour,
   estimateYield,
   calculateStaminaEfficiency,
+  calculateBreakageRate,
+  calculateRiceYield,
+  calculateIntegrityRate,
+  calculateStaminaYieldRatio,
+  calculateImpactEnergy,
+  GRAIN_CONFIGS,
+  DEFAULT_PHYSICS_CONFIG,
 } from '../utils/physics';
 import {
   addRecord,
@@ -46,6 +55,8 @@ interface SimulationStore {
   setCooperationStrategy: (strategy: CooperationStrategy) => void;
   updateStepper: (id: number, updates: Partial<StepperConfig>) => void;
   setTotalStaminaBudget: (budget: number) => void;
+  setGrainType: (grainType: GrainType) => void;
+  setProcessingGoal: (goal: ProcessingGoal) => void;
 
   start: () => void;
   pause: () => void;
@@ -62,7 +73,9 @@ interface SimulationStore {
     isEffective: boolean,
     huskRate: number,
     contributingSteppers: number[],
-    perStepperDelta: { id: number; steps: number; stamina: number }[]
+    perStepperDelta: { id: number; steps: number; stamina: number }[],
+    impactVelocity?: number,
+    dropHeight?: number
   ) => void;
   consumeStamina: (amount: number) => void;
 
@@ -106,6 +119,12 @@ const getInitialState = (params?: SimulationParams): SimulationState => {
     stepperStates: [],
     totalStaminaUsed: 0,
     staminaBudgetRemaining: params?.multiPerson?.totalStaminaBudget || 100,
+    riceYield: 0,
+    totalBroken: 0,
+    totalIntact: 0,
+    currentBreakageRate: 0,
+    currentIntegrityRate: 100,
+    staminaYieldRatio: 0,
   };
 
   if (params) {
@@ -266,6 +285,34 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
   },
 
+  setGrainType: (grainType: GrainType) => {
+    const current = get();
+    const updatedParams = { ...current.params, grainType };
+
+    if (current.state.isRunning) {
+      set({ params: updatedParams });
+    } else {
+      set({
+        params: updatedParams,
+        state: getInitialState(updatedParams),
+      });
+    }
+  },
+
+  setProcessingGoal: (goal: ProcessingGoal) => {
+    const current = get();
+    const updatedParams = { ...current.params, processingGoal: goal };
+
+    if (current.state.isRunning) {
+      set({ params: updatedParams });
+    } else {
+      set({
+        params: updatedParams,
+        state: getInitialState(updatedParams),
+      });
+    }
+  },
+
   start: () => {
     const { currentChallenge, params } = get();
     const validation = validateParams(get().params);
@@ -365,7 +412,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
   recordEfficiencyPoint: () => {
     const { state, params } = get();
-    const { elapsedTime, totalStrikes, effectiveStrikes, accumulatedYield, totalStaminaUsed } = state;
+    const { elapsedTime, totalStrikes, effectiveStrikes, accumulatedYield, totalStaminaUsed, riceYield, currentBreakageRate, currentIntegrityRate, staminaYieldRatio } = state;
 
     if (elapsedTime <= 0) return;
 
@@ -382,6 +429,10 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         (accumulatedYield * ss.effectiveContributions) /
         Math.max(1, effectiveStrikes)
       ),
+      riceYield,
+      breakageRate: currentBreakageRate,
+      integrityRate: currentIntegrityRate,
+      staminaYieldRatio,
     };
 
     set((state) => ({
@@ -396,7 +447,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     isEffective: boolean,
     huskRate: number,
     contributingSteppers: number[],
-    perStepperDelta: { id: number; steps: number; stamina: number }[]
+    perStepperDelta: { id: number; steps: number; stamina: number }[],
+    impactVelocity: number = 5,
+    dropHeight: number = 0.3
   ) => {
     const { state, params } = get();
 
@@ -407,7 +460,23 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       : state.currentHuskRate;
 
     const participantCount = params.multiPerson?.participantCount || 1;
-    const newYield = estimateYield(newEffective, params.grainWeight, newHuskRate, participantCount);
+    const newYield = estimateYield(newEffective, params.grainWeight, newHuskRate, participantCount, params.grainType, params.processingGoal);
+
+    const impactEnergy = calculateImpactEnergy(impactVelocity);
+    const strikeBreakageRate = isEffective
+      ? calculateBreakageRate(impactEnergy, params.grainWeight, newEffective, params.grainType, params.processingGoal, dropHeight)
+      : state.currentBreakageRate / 100;
+
+    const newBreakageRate = isEffective
+      ? (state.currentBreakageRate * state.effectiveStrikes + strikeBreakageRate * 100) / newEffective
+      : state.currentBreakageRate;
+
+    const newIntegrityRate = calculateIntegrityRate(newBreakageRate / 100, newEffective);
+    const newRiceYield = calculateRiceYield(newYield, newHuskRate, params.grainType, params.processingGoal, newBreakageRate / 100);
+
+    const processedPerStrike = isEffective ? params.grainWeight * 0.1 * newHuskRate : 0;
+    const newBroken = state.totalBroken + processedPerStrike * (newBreakageRate / 100);
+    const newIntact = state.totalIntact + processedPerStrike * (1 - newBreakageRate / 100);
 
     let newTotalStaminaUsed = state.totalStaminaUsed;
     const newStepperStates = state.stepperStates.map((ss) => {
@@ -432,6 +501,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     });
 
     const budgetRemaining = (params.multiPerson?.totalStaminaBudget || 100) - newTotalStaminaUsed;
+    const newStaminaYieldRatio = calculateStaminaYieldRatio(newRiceYield, newTotalStaminaUsed);
 
     set((state) => ({
       state: {
@@ -440,6 +510,12 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         effectiveStrikes: newEffective,
         accumulatedYield: newYield,
         currentHuskRate: newHuskRate,
+        riceYield: newRiceYield,
+        totalBroken: newBroken,
+        totalIntact: newIntact,
+        currentBreakageRate: newBreakageRate,
+        currentIntegrityRate: newIntegrityRate,
+        staminaYieldRatio: newStaminaYieldRatio,
         stepperStates: newStepperStates,
         totalStaminaUsed: newTotalStaminaUsed,
         staminaBudgetRemaining: Math.max(0, budgetRemaining),
@@ -500,7 +576,13 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       participantCount: participantCount as ParticipantCount,
       cooperationStrategy: strategy,
       totalStaminaUsed: state.totalStaminaUsed,
-      staminaEfficiency: calculateStaminaEfficiency(state.accumulatedYield, state.totalStaminaUsed),
+      staminaEfficiency: calculateStaminaEfficiency(state.accumulatedYield, state.totalStaminaUsed, params.processingGoal),
+      grainType: params.grainType,
+      processingGoal: params.processingGoal,
+      riceYield: state.riceYield,
+      finalBreakageRate: state.currentBreakageRate,
+      finalIntegrityRate: state.currentIntegrityRate,
+      staminaYieldRatio: state.staminaYieldRatio,
       perPersonStats,
     };
 
@@ -525,10 +607,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       const mp = record.params.multiPerson || getDefaultMultiPersonParams(1, 'alternating');
       const perPersonBudget = mp.totalStaminaBudget / mp.participantCount;
 
+      const loadedParams = JSON.parse(JSON.stringify(record.params));
+      if (!loadedParams.grainType) loadedParams.grainType = 'rice';
+      if (!loadedParams.processingGoal) loadedParams.processingGoal = 'balanced';
+
       set({
-        params: JSON.parse(JSON.stringify(record.params)),
+        params: loadedParams,
         state: {
-          ...getInitialState(record.params),
+          ...getInitialState(loadedParams),
           elapsedTime: record.duration,
           totalStrikes: record.totalStrikes,
           effectiveStrikes: record.effectiveStrikes,
@@ -545,9 +631,15 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
             totalSteps: ps.steps,
             effectiveContributions: Math.floor((ps.contributionRate / 100) * record.effectiveStrikes),
             staminaHistory: [],
-          })) || getInitialStepperStates(record.params),
+          })) || getInitialStepperStates(loadedParams),
           totalStaminaUsed: record.totalStaminaUsed,
           staminaBudgetRemaining: Math.max(0, mp.totalStaminaBudget - record.totalStaminaUsed),
+          riceYield: record.riceYield || 0,
+          totalBroken: record.finalBreakageRate ? record.finalYield * (record.finalBreakageRate / 100) * 0.5 : 0,
+          totalIntact: record.finalIntegrityRate ? record.finalYield * (record.finalIntegrityRate / 100) * 0.5 : 0,
+          currentBreakageRate: record.finalBreakageRate || 0,
+          currentIntegrityRate: record.finalIntegrityRate || 100,
+          staminaYieldRatio: record.staminaYieldRatio || 0,
         },
         mode: record.mode,
       });

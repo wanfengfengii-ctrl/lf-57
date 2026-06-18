@@ -1,3 +1,30 @@
+export type GrainType = 'rice' | 'millet' | 'sorghum' | 'wheat' | 'buckwheat';
+
+export type ProcessingGoal = 'highYield' | 'lowBreakage' | 'energySaving' | 'balanced';
+
+export interface GrainConfig {
+  id: GrainType;
+  name: string;
+  emoji: string;
+  shellingDifficulty: number;
+  optimalImpactMin: number;
+  optimalImpactMax: number;
+  baseRiceYieldRate: number;
+  baseBreakageRate: number;
+  description: string;
+}
+
+export interface GoalConfig {
+  id: ProcessingGoal;
+  name: string;
+  icon: string;
+  description: string;
+  yieldMultiplier: number;
+  breakageMultiplier: number;
+  energyMultiplier: number;
+  huskRateMultiplier: number;
+}
+
 export interface StepperConfig {
   id: number;
   name: string;
@@ -33,6 +60,8 @@ export interface SimulationParams {
   pivotPosition: number;
   stepFrequency: number;
   grainWeight: number;
+  grainType: GrainType;
+  processingGoal: ProcessingGoal;
   multiPerson?: MultiPersonParams;
 }
 
@@ -44,6 +73,10 @@ export interface EfficiencyPoint {
   effectiveStrikes: number;
   staminaUsed: number;
   perPersonYield?: number[];
+  riceYield?: number;
+  breakageRate?: number;
+  integrityRate?: number;
+  staminaYieldRatio?: number;
 }
 
 export interface SimulationState {
@@ -60,6 +93,12 @@ export interface SimulationState {
   stepperStates: StepperState[];
   totalStaminaUsed: number;
   staminaBudgetRemaining: number;
+  riceYield: number;
+  totalBroken: number;
+  totalIntact: number;
+  currentBreakageRate: number;
+  currentIntegrityRate: number;
+  staminaYieldRatio: number;
 }
 
 export type SimulationMode = 'free' | 'challenge';
@@ -106,6 +145,12 @@ export interface ExperimentRecord {
   cooperationStrategy: CooperationStrategy;
   totalStaminaUsed: number;
   staminaEfficiency: number;
+  grainType: GrainType;
+  processingGoal: ProcessingGoal;
+  riceYield: number;
+  finalBreakageRate: number;
+  finalIntegrityRate: number;
+  staminaYieldRatio: number;
   perPersonStats?: {
     id: number;
     name: string;

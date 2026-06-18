@@ -201,6 +201,8 @@ export function getDefaultParams(): SimulationParams {
     pivotPosition: ranges.pivotPosition.default,
     stepFrequency: ranges.stepFrequency.default,
     grainWeight: ranges.grainWeight.default,
+    grainType: 'rice',
+    processingGoal: 'balanced',
     multiPerson: getDefaultMultiPersonParams(1, 'alternating'),
   };
 }

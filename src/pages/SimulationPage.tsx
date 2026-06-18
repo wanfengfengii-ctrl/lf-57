@@ -15,6 +15,8 @@ import { SimulationScene } from '../components/SimulationScene';
 import { StatsPanel } from '../components/StatsPanel';
 import { ModeSelector } from '../components/ModeSelector';
 import { RecordList } from '../components/RecordList';
+import { GrainSelector } from '../components/GrainSelector';
+import { GrainMetrics } from '../components/GrainMetrics';
 import { useSimulationStore } from '../store/simulationStore';
 
 export function SimulationPage() {
@@ -53,6 +55,8 @@ export function SimulationPage() {
     setCooperationStrategy,
     updateStepper,
     setTotalStaminaBudget,
+    setGrainType,
+    setProcessingGoal,
   } = useSimulation(canvasRef);
 
   const errors = getValidationErrors();
@@ -114,6 +118,16 @@ export function SimulationPage() {
             />
 
             <Box mt="lg">
+              <GrainSelector
+                grainType={params.grainType}
+                processingGoal={params.processingGoal}
+                onGrainChange={setGrainType}
+                onGoalChange={setProcessingGoal}
+                disabled={state.isRunning && !state.isPaused}
+              />
+            </Box>
+
+            <Box mt="lg">
               <Paper p="lg" radius="md">
                 <ModeSelector
                   mode={mode}
@@ -147,6 +161,15 @@ export function SimulationPage() {
               onSave={handleSave}
               errors={errors}
             />
+
+            <Box mt="lg">
+              <GrainMetrics
+                state={state}
+                elapsedTime={state.elapsedTime}
+                grainType={params.grainType}
+                processingGoal={params.processingGoal}
+              />
+            </Box>
           </Grid.Col>
 
           <Grid.Col span={{ base: 12, md: 3 }}>
@@ -174,6 +197,8 @@ export function SimulationPage() {
                   staminaEfficiency={staminaEfficiency}
                   participantCount={params.multiPerson?.participantCount || 1}
                   cooperationStrategy={params.multiPerson?.cooperationStrategy || 'synchronized'}
+                  grainType={params.grainType}
+                  processingGoal={params.processingGoal}
                   allRecords={records}
                 />
               </Tabs.Panel>

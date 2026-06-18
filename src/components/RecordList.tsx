@@ -14,7 +14,7 @@ import {
   Checkbox,
   Divider,
 } from '@mantine/core';
-import { Trash2, Play, History, Users, Filter, GitCompare, Zap } from 'lucide-react';
+import { Trash2, Play, History, Users, Filter, GitCompare, Zap, Wheat, Target } from 'lucide-react';
 import {
   ComposedChart,
   Area,
@@ -34,8 +34,9 @@ import {
   PolarRadiusAxis,
   Radar,
 } from 'recharts';
-import type { ExperimentRecord, ParticipantCount, CooperationStrategy } from '../types';
+import type { ExperimentRecord, ParticipantCount, CooperationStrategy, GrainType, ProcessingGoal } from '../types';
 import { getStrategyName } from '../utils/validation';
+import { GRAIN_CONFIGS, GOAL_CONFIGS } from '../utils/physics';
 
 interface RecordListProps {
   records: ExperimentRecord[];
@@ -69,6 +70,8 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
   const [selectedRecord, setSelectedRecord] = useState<ExperimentRecord | null>(null);
   const [filterParticipants, setFilterParticipants] = useState<ParticipantCount | 'all'>('all');
   const [filterStrategy, setFilterStrategy] = useState<CooperationStrategy | 'all'>('all');
+  const [filterGrain, setFilterGrain] = useState<GrainType | 'all'>('all');
+  const [filterGoal, setFilterGoal] = useState<ProcessingGoal | 'all'>('all');
   const [compareMode, setCompareMode] = useState(false);
   const [compareIds, setCompareIds] = useState<string[]>([]);
 
@@ -80,9 +83,15 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
       if (filterStrategy !== 'all' && r.cooperationStrategy !== filterStrategy) {
         return false;
       }
+      if (filterGrain !== 'all' && r.grainType !== filterGrain) {
+        return false;
+      }
+      if (filterGoal !== 'all' && r.processingGoal !== filterGoal) {
+        return false;
+      }
       return true;
     });
-  }, [records, filterParticipants, filterStrategy]);
+  }, [records, filterParticipants, filterStrategy, filterGrain, filterGoal]);
 
   const compareRecords = useMemo(() => {
     return records.filter((r) => compareIds.includes(r.id));
@@ -92,11 +101,13 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
     return compareRecords.map((r) => {
       const effectiveRate = r.totalStrikes > 0 ? (r.effectiveStrikes / r.totalStrikes) * 100 : 0;
       const yieldPerHour = r.duration > 0 ? (r.finalYield / r.duration) * 3600 : 0;
+      const grainName = r.grainType ? GRAIN_CONFIGS[r.grainType]?.name : '';
       return {
-        name: `${r.participantCount}人${getStrategyName(r.cooperationStrategy)}`,
+        name: `${grainName}${r.participantCount}人${getStrategyName(r.cooperationStrategy)}`,
         有效率: effectiveRate,
         时产量: yieldPerHour,
-        体力效率: r.staminaEfficiency,
+        完整率: r.finalIntegrityRate || 100,
+        体力收益: r.staminaYieldRatio || 0,
         最大高度: r.maxHeight * 100,
       };
     });
@@ -104,13 +115,16 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
 
   const radarCompareData = useMemo(() => {
     if (compareRecords.length === 0) return [];
-    const subjects = ['有效率', '时产量', '体力效率', '持续性', '协同度'];
+    const subjects = ['有效率', '时产量', '完整率', '体力收益', '质量度'];
     return subjects.map((subject) => {
       const obj: any = { subject };
       compareRecords.forEach((r, i) => {
         const effectiveRate = r.totalStrikes > 0 ? (r.effectiveStrikes / r.totalStrikes) * 100 : 0;
         const yieldPerHour = r.duration > 0 ? (r.finalYield / r.duration) * 3600 : 0;
-        const key = `${r.participantCount}人${getStrategyName(r.cooperationStrategy)}(${i + 1})`;
+        const integrity = r.finalIntegrityRate || 100;
+        const staminaRatio = r.staminaYieldRatio || 0;
+        const grainName = r.grainType ? GRAIN_CONFIGS[r.grainType]?.name : '';
+        const key = `${grainName}${r.participantCount}人${getStrategyName(r.cooperationStrategy)}(${i + 1})`;
         switch (subject) {
           case '有效率':
             obj[key] = effectiveRate;
@@ -118,14 +132,14 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
           case '时产量':
             obj[key] = Math.min(100, yieldPerHour);
             break;
-          case '体力效率':
-            obj[key] = Math.min(100, r.staminaEfficiency);
+          case '完整率':
+            obj[key] = integrity;
             break;
-          case '持续性':
-            obj[key] = r.totalStaminaUsed > 0 ? Math.min(100, (r.finalYield / r.totalStaminaUsed) * 200) : 50;
+          case '体力收益':
+            obj[key] = Math.min(100, staminaRatio);
             break;
-          case '协同度':
-            obj[key] = r.participantCount === 1 ? 50 : 60 + (r.participantCount - 1) * 15;
+          case '质量度':
+            obj[key] = Math.min(100, integrity * 0.5 + staminaRatio * 0.3 + effectiveRate * 0.2);
             break;
         }
       });
@@ -191,15 +205,15 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
             <Group gap="xs">
               <Filter size={14} color="#8B5A2B" />
               <Text size="xs" fw={500} c="wood.7">
-                筛选
+                多维筛选
               </Text>
             </Group>
-            <Group gap="xs">
+            <Group gap="xs" wrap="wrap">
               <SegmentedControl
                 value={String(filterParticipants)}
                 onChange={(v) => setFilterParticipants(v === 'all' ? 'all' : (Number(v) as ParticipantCount))}
                 data={[
-                  { label: '全部', value: 'all' },
+                  { label: '全部人数', value: 'all' },
                   { label: '1人', value: '1' },
                   { label: '2人', value: '2' },
                   { label: '3人', value: '3' },
@@ -208,7 +222,7 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                 color="wood"
               />
             </Group>
-            <Group gap="xs">
+            <Group gap="xs" wrap="wrap">
               <SegmentedControl
                 value={String(filterStrategy)}
                 onChange={(v) => setFilterStrategy(v === 'all' ? 'all' : (v as CooperationStrategy))}
@@ -218,6 +232,44 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                   { label: '交替', value: 'alternating' },
                   { label: '独立', value: 'independent' },
                   { label: '波浪', value: 'wave' },
+                ]}
+                size="xs"
+                color="bamboo"
+              />
+            </Group>
+            <Group gap="xs" wrap="wrap">
+              <Group gap="xs">
+                <Wheat size={12} color="#8B5A2B" />
+                <Text size="xs" fw={500} c="wood.7">谷物:</Text>
+              </Group>
+              <SegmentedControl
+                value={String(filterGrain)}
+                onChange={(v) => setFilterGrain(v === 'all' ? 'all' : (v as GrainType))}
+                data={[
+                  { label: '全部', value: 'all' },
+                  ...Object.values(GRAIN_CONFIGS).map((g) => ({
+                    label: `${g.emoji}${g.name}`,
+                    value: g.id,
+                  })),
+                ]}
+                size="xs"
+                color="wood"
+              />
+            </Group>
+            <Group gap="xs" wrap="wrap">
+              <Group gap="xs">
+                <Target size={12} color="#2E8B57" />
+                <Text size="xs" fw={500} c="wood.7">目标:</Text>
+              </Group>
+              <SegmentedControl
+                value={String(filterGoal)}
+                onChange={(v) => setFilterGoal(v === 'all' ? 'all' : (v as ProcessingGoal))}
+                data={[
+                  { label: '全部', value: 'all' },
+                  ...Object.values(GOAL_CONFIGS).map((g) => ({
+                    label: `${g.icon}${g.name}`,
+                    value: g.id,
+                  })),
                 ]}
                 size="xs"
                 color="bamboo"
@@ -293,7 +345,7 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                       }}
                     >
                       <Group justify="space-between" mb="xs">
-                        <Group gap="xs">
+                        <Group gap="xs" wrap="wrap">
                           {compareMode && (
                             <Checkbox
                               checked={isInCompare}
@@ -319,6 +371,24 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                               {record.participantCount}人{getStrategyName(record.cooperationStrategy)}
                             </Group>
                           </Badge>
+                          {record.grainType && (
+                            <Badge
+                              size="xs"
+                              color="wood"
+                              variant="light"
+                            >
+                              {GRAIN_CONFIGS[record.grainType]?.emoji} {GRAIN_CONFIGS[record.grainType]?.name || record.grainType}
+                            </Badge>
+                          )}
+                          {record.processingGoal && (
+                            <Badge
+                              size="xs"
+                              color="bamboo"
+                              variant="light"
+                            >
+                              {GOAL_CONFIGS[record.processingGoal]?.icon} {GOAL_CONFIGS[record.processingGoal]?.name || record.processingGoal}
+                            </Badge>
+                          )}
                           {record.challengeSuccess !== undefined && (
                             <Badge
                               color={record.challengeSuccess ? 'bamboo' : 'terracotta'}
@@ -345,20 +415,30 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                         </Box>
                         <Box>
                           <Text size="xs" c="wood.5">
-                            有效率
+                            成米
                           </Text>
-                          <Text size="sm" fw={600} c="bamboo.7">
-                            {record.totalStrikes > 0
-                              ? ((record.effectiveStrikes / record.totalStrikes) * 100).toFixed(0)
-                              : 0}%
+                          <Text size="sm" fw={600} c="wood.8">
+                            {record.riceYield?.toFixed(2) || '0.00'}kg
                           </Text>
                         </Box>
                         <Box>
                           <Text size="xs" c="wood.5">
-                            体力效率
+                            完整率
+                          </Text>
+                          <Text
+                            size="sm"
+                            fw={600}
+                            c={(record.finalIntegrityRate || 100) >= 90 ? 'bamboo.7' : (record.finalIntegrityRate || 100) >= 75 ? 'wood.7' : 'terracotta.7'}
+                          >
+                            {record.finalIntegrityRate?.toFixed(0) || '100'}%
+                          </Text>
+                        </Box>
+                        <Box>
+                          <Text size="xs" c="wood.5">
+                            体力收益
                           </Text>
                           <Text size="sm" fw={600} c="#4169E1">
-                            {record.staminaEfficiency?.toFixed(0) || 0}
+                            {record.staminaYieldRatio?.toFixed(0) || '0'}
                           </Text>
                         </Box>
                       </Group>
@@ -449,7 +529,8 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                       <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fill: '#8B5A2B' }} />
                       <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 9, fill: '#A67C52' }} />
                       {compareRecords.map((r, i) => {
-                        const key = `${r.participantCount}人${getStrategyName(r.cooperationStrategy)}(${i + 1})`;
+                        const grainName = r.grainType ? GRAIN_CONFIGS[r.grainType]?.name : '';
+                        const key = `${grainName}${r.participantCount}人${getStrategyName(r.cooperationStrategy)}(${i + 1})`;
                         return (
                           <Radar
                             key={r.id}
@@ -490,7 +571,8 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                       <Legend wrapperStyle={{ fontSize: '10px' }} />
                       <Bar dataKey="有效率" name="有效率(%)" fill="#2E8B57" radius={[2, 2, 0, 0]} />
                       <Bar dataKey="时产量" name="时产量(kg)" fill="#8B5A2B" radius={[2, 2, 0, 0]} />
-                      <Bar dataKey="体力效率" name="体力效率" fill="#4169E1" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey="完整率" name="完整率(%)" fill="#228B22" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey="体力收益" name="单位体力收益" fill="#4169E1" radius={[2, 2, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : null}
@@ -517,34 +599,44 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                           borderRadius: '6px',
                         }}
                       >
-                        <Group mb="sm">
+                        <Group mb="sm" wrap="wrap">
                           <Badge color={radarColors[i]} size="sm">
                             {i + 1}. {r.participantCount}人{getStrategyName(r.cooperationStrategy)}
                           </Badge>
+                          {r.grainType && (
+                            <Badge color="wood" variant="light" size="sm">
+                              {GRAIN_CONFIGS[r.grainType]?.emoji}{GRAIN_CONFIGS[r.grainType]?.name}
+                            </Badge>
+                          )}
+                          {r.processingGoal && (
+                            <Badge color="bamboo" variant="light" size="sm">
+                              {GOAL_CONFIGS[r.processingGoal]?.icon}{GOAL_CONFIGS[r.processingGoal]?.name}
+                            </Badge>
+                          )}
                           <Text size="xs" c="wood.5">
                             {formatDate(r.timestamp)}
                           </Text>
                         </Group>
-                        <Group grow>
+                        <Group grow wrap="wrap">
                           <Box>
-                            <Text size="xs" c="wood.5">产量</Text>
+                            <Text size="xs" c="wood.5">脱壳</Text>
                             <Text size="sm" fw={600} c="wood.8">{r.finalYield.toFixed(2)}kg</Text>
                           </Box>
                           <Box>
-                            <Text size="xs" c="wood.5">有效率</Text>
-                            <Text size="sm" fw={600} c="bamboo.7">{effectiveRate.toFixed(1)}%</Text>
+                            <Text size="xs" c="wood.5">成米</Text>
+                            <Text size="sm" fw={600} c="bamboo.7">{r.riceYield?.toFixed(2) || '0'}kg</Text>
                           </Box>
                           <Box>
-                            <Text size="xs" c="wood.5">时产量</Text>
-                            <Text size="sm" fw={600} c="wood.8">{yieldPerHour.toFixed(1)}kg/h</Text>
+                            <Text size="xs" c="wood.5">完整率</Text>
+                            <Text size="sm" fw={600} c="wood.7">{r.finalIntegrityRate?.toFixed(1) || '100'}%</Text>
                           </Box>
                           <Box>
-                            <Text size="xs" c="wood.5">体力消耗</Text>
-                            <Text size="sm" fw={600} c="terracotta.7">{r.totalStaminaUsed?.toFixed(0) || 0}</Text>
+                            <Text size="xs" c="wood.5">破损率</Text>
+                            <Text size="sm" fw={600} c="terracotta.7">{r.finalBreakageRate?.toFixed(1) || '0'}%</Text>
                           </Box>
                           <Box>
-                            <Text size="xs" c="wood.5">体力效率</Text>
-                            <Text size="sm" fw={600} c="#4169E1">{r.staminaEfficiency?.toFixed(1) || 0}</Text>
+                            <Text size="xs" c="wood.5">体力收益</Text>
+                            <Text size="sm" fw={600} c="#4169E1">{r.staminaYieldRatio?.toFixed(0) || '0'}</Text>
                           </Box>
                           <Box>
                             <Text size="xs" c="wood.5">时长</Text>
@@ -561,7 +653,7 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
         ) : selectedRecord && (
           <Stack gap="md">
             <Group justify="space-between">
-              <Group gap="xs">
+              <Group gap="xs" wrap="wrap">
                 <Badge color={selectedRecord.mode === 'free' ? 'wood' : 'bamboo'}>
                   {selectedRecord.mode === 'free' ? '自由实验' : '目标挑战'}
                 </Badge>
@@ -569,39 +661,96 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                   <Users size={12} />
                   {selectedRecord.participantCount}人 · {getStrategyName(selectedRecord.cooperationStrategy)}
                 </Badge>
+                {selectedRecord.grainType && (
+                  <Badge color="wood" variant="light">
+                    {GRAIN_CONFIGS[selectedRecord.grainType]?.emoji} {GRAIN_CONFIGS[selectedRecord.grainType]?.name || selectedRecord.grainType}
+                  </Badge>
+                )}
+                {selectedRecord.processingGoal && (
+                  <Badge color="bamboo" variant="light">
+                    {GOAL_CONFIGS[selectedRecord.processingGoal]?.icon} {GOAL_CONFIGS[selectedRecord.processingGoal]?.name || selectedRecord.processingGoal}
+                  </Badge>
+                )}
                 <Text size="sm" c="wood.5">
                   {formatDate(selectedRecord.timestamp)}
                 </Text>
               </Group>
             </Group>
 
-            <Box p="md" style={{ backgroundColor: '#FBF5E6', borderRadius: '8px' }}>
-              <Text size="sm" fw={500} c="wood.7" mb="sm">
-                📐 参数配置
-              </Text>
-              <Group grow>
-                <Box>
-                  <Text size="xs" c="wood.5">踏板长度</Text>
-                  <Text size="sm" fw={600} c="wood.8">{selectedRecord.params.pedalLength.toFixed(2)} m</Text>
+            <Group grow>
+              <Box p="md" style={{ backgroundColor: '#FBF5E6', borderRadius: '8px' }}>
+                <Text size="sm" fw={500} c="wood.7" mb="sm">
+                  📐 参数配置
+                </Text>
+                <Stack gap={4}>
+                  <Group justify="space-between">
+                    <Text size="xs" c="wood.5">踏板长度</Text>
+                    <Text size="sm" fw={600} c="wood.8">{selectedRecord.params.pedalLength.toFixed(2)} m</Text>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text size="xs" c="wood.5">支点位置</Text>
+                    <Text size="sm" fw={600} c="wood.8">{selectedRecord.params.pivotPosition.toFixed(2)} m</Text>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text size="xs" c="wood.5">踩踏频率</Text>
+                    <Text size="sm" fw={600} c="wood.8">{selectedRecord.params.stepFrequency.toFixed(2)} Hz</Text>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text size="xs" c="wood.5">谷物重量</Text>
+                    <Text size="sm" fw={600} c="wood.8">{selectedRecord.params.grainWeight.toFixed(1)} kg</Text>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text size="xs" c="wood.5">体力消耗</Text>
+                    <Text size="sm" fw={600} c="terracotta.7">{selectedRecord.totalStaminaUsed?.toFixed(0) || 0}</Text>
+                  </Group>
+                </Stack>
+              </Box>
+
+              {selectedRecord.grainType && (
+                <Box p="md" style={{ backgroundColor: '#F0F9F4', borderRadius: '8px' }}>
+                  <Text size="sm" fw={500} c="wood.7" mb="sm">
+                    🌾 谷物与加工目标
+                  </Text>
+                  <Stack gap={4}>
+                    <Group justify="space-between">
+                      <Text size="xs" c="wood.5">谷物品种</Text>
+                      <Text size="sm" fw={600} c="wood.8">
+                        {GRAIN_CONFIGS[selectedRecord.grainType]?.emoji} {GRAIN_CONFIGS[selectedRecord.grainType]?.name}
+                      </Text>
+                    </Group>
+                    <Group justify="space-between">
+                      <Text size="xs" c="wood.5">脱壳难度</Text>
+                      <Text size="sm" fw={600} c="wood.8">
+                        {GRAIN_CONFIGS[selectedRecord.grainType]?.shellingDifficulty.toFixed(2)}
+                      </Text>
+                    </Group>
+                    <Group justify="space-between">
+                      <Text size="xs" c="wood.5">最佳冲击</Text>
+                      <Text size="sm" fw={600} c="bamboo.7">
+                        {GRAIN_CONFIGS[selectedRecord.grainType]?.optimalImpactMin.toFixed(2)}-{GRAIN_CONFIGS[selectedRecord.grainType]?.optimalImpactMax.toFixed(2)} m/s
+                      </Text>
+                    </Group>
+                    <Group justify="space-between">
+                      <Text size="xs" c="wood.5">理论成米率</Text>
+                      <Text size="sm" fw={600} c="bamboo.7">
+                        {(GRAIN_CONFIGS[selectedRecord.grainType]?.baseRiceYieldRate * 100).toFixed(0)}%
+                      </Text>
+                    </Group>
+                    {selectedRecord.processingGoal && (
+                      <>
+                        <Divider my={4} />
+                        <Group justify="space-between">
+                          <Text size="xs" c="wood.5">加工目标</Text>
+                          <Text size="sm" fw={600} c="wood.8">
+                            {GOAL_CONFIGS[selectedRecord.processingGoal]?.icon} {GOAL_CONFIGS[selectedRecord.processingGoal]?.name}
+                          </Text>
+                        </Group>
+                      </>
+                    )}
+                  </Stack>
                 </Box>
-                <Box>
-                  <Text size="xs" c="wood.5">支点位置</Text>
-                  <Text size="sm" fw={600} c="wood.8">{selectedRecord.params.pivotPosition.toFixed(2)} m</Text>
-                </Box>
-                <Box>
-                  <Text size="xs" c="wood.5">踩踏频率</Text>
-                  <Text size="sm" fw={600} c="wood.8">{selectedRecord.params.stepFrequency.toFixed(2)} Hz</Text>
-                </Box>
-                <Box>
-                  <Text size="xs" c="wood.5">谷物重量</Text>
-                  <Text size="sm" fw={600} c="wood.8">{selectedRecord.params.grainWeight.toFixed(1)} kg</Text>
-                </Box>
-                <Box>
-                  <Text size="xs" c="wood.5">体力消耗</Text>
-                  <Text size="sm" fw={600} c="terracotta.7">{selectedRecord.totalStaminaUsed?.toFixed(0) || 0}</Text>
-                </Box>
-              </Group>
-            </Box>
+              )}
+            </Group>
 
             {selectedRecord.perPersonStats && selectedRecord.perPersonStats.length > 0 && (
               <Box p="md" style={{ backgroundColor: '#E6EEFA', borderRadius: '8px' }}>
@@ -651,24 +800,36 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
               </Text>
               <Group grow>
                 <Box>
-                  <Text size="xs" c="wood.5">累计产量</Text>
+                  <Text size="xs" c="wood.5">累计脱壳</Text>
                   <Text size="lg" fw={700} c="bamboo.7">{selectedRecord.finalYield.toFixed(2)} kg</Text>
                 </Box>
                 <Box>
-                  <Text size="xs" c="wood.5">有效冲击率</Text>
-                  <Text size="lg" fw={700} c="wood.8">
-                    {selectedRecord.totalStrikes > 0
-                      ? ((selectedRecord.effectiveStrikes / selectedRecord.totalStrikes) * 100).toFixed(1)
-                      : 0}%
+                  <Text size="xs" c="wood.5">成米产量</Text>
+                  <Text size="lg" fw={700} c="wood.8">{selectedRecord.riceYield?.toFixed(2) || '0.00'} kg</Text>
+                </Box>
+                <Box>
+                  <Text size="xs" c="wood.5">完整率</Text>
+                  <Text
+                    size="lg"
+                    fw={700}
+                    c={(selectedRecord.finalIntegrityRate || 100) >= 90 ? 'bamboo.7' : (selectedRecord.finalIntegrityRate || 100) >= 75 ? 'wood.7' : 'terracotta.7'}
+                  >
+                    {selectedRecord.finalIntegrityRate?.toFixed(1) || '100'}%
                   </Text>
                 </Box>
                 <Box>
-                  <Text size="xs" c="wood.5">平均效率</Text>
-                  <Text size="lg" fw={700} c="wood.8">{(selectedRecord.avgEfficiency * 3600).toFixed(1)} kg/h</Text>
+                  <Text size="xs" c="wood.5">破损率</Text>
+                  <Text
+                    size="lg"
+                    fw={700}
+                    c={(selectedRecord.finalBreakageRate || 0) <= 5 ? 'bamboo.7' : (selectedRecord.finalBreakageRate || 0) <= 15 ? 'wood.7' : 'terracotta.7'}
+                  >
+                    {selectedRecord.finalBreakageRate?.toFixed(1) || '0'}%
+                  </Text>
                 </Box>
                 <Box>
-                  <Text size="xs" c="wood.5">体力效率</Text>
-                  <Text size="lg" fw={700} c="#4169E1">{selectedRecord.staminaEfficiency?.toFixed(1) || 0}</Text>
+                  <Text size="xs" c="wood.5">单位体力收益</Text>
+                  <Text size="lg" fw={700} c="#4169E1">{selectedRecord.staminaYieldRatio?.toFixed(0) || '0'} g/千点</Text>
                 </Box>
               </Group>
             </Box>
@@ -681,6 +842,7 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                 <Tabs defaultValue="efficiency" variant="pills">
                   <Tabs.List grow mb="sm">
                     <Tabs.Tab value="efficiency">效率曲线</Tabs.Tab>
+                    <Tabs.Tab value="grain">谷物加工</Tabs.Tab>
                     <Tabs.Tab value="strikes">冲击统计</Tabs.Tab>
                     <Tabs.Tab value="yield">产量趋势</Tabs.Tab>
                     <Tabs.Tab value="stamina">体力消耗</Tabs.Tab>
@@ -698,6 +860,32 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                           <Legend wrapperStyle={{ fontSize: '10px' }} />
                           <Area yAxisId="left" type="monotone" dataKey="effectiveRate" name="有效冲击率(%)" fill="#2E8B5733" stroke="#2E8B57" strokeWidth={2} />
                           <Line yAxisId="right" type="monotone" dataKey="yieldPerHour" name="时产量(kg/h)" stroke="#8B5A2B" strokeWidth={2} dot={{ r: 2 }} />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  </Tabs.Panel>
+
+                  <Tabs.Panel value="grain">
+                    <Box h={200}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart
+                          data={selectedRecord.efficiencyHistory.map((p) => ({
+                            time: p.time,
+                            完整率: p.integrityRate ?? 100,
+                            破损率: p.breakageRate ?? 0,
+                            体力收益: p.staminaYieldRatio ?? 0,
+                          }))}
+                          margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                          <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                          <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#8B5A2B' }} domain={[0, 100]} />
+                          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#4169E1' }} />
+                          <Tooltip contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px' }} />
+                          <Legend wrapperStyle={{ fontSize: '10px' }} />
+                          <Area yAxisId="left" type="monotone" dataKey="完整率" name="完整率(%)" fill="#2E8B5733" stroke="#2E8B57" strokeWidth={2} />
+                          <Line yAxisId="left" type="monotone" dataKey="破损率" name="破损率(%)" stroke="#CD5C5C" strokeWidth={2} dot={{ r: 2 }} />
+                          <Line yAxisId="right" type="monotone" dataKey="体力收益" name="单位体力收益(g/千点)" stroke="#4169E1" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 2 }} />
                         </ComposedChart>
                       </ResponsiveContainer>
                     </Box>
@@ -726,6 +914,7 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                           data={selectedRecord.efficiencyHistory.map((p) => ({
                             ...p,
                             累计产量: (p.yieldPerHour * p.time) / 3600,
+                            成米产量: p.riceYield || 0,
                           }))}
                           margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
                         >
@@ -734,7 +923,8 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                           <YAxis tick={{ fontSize: 10, fill: '#8B5A2B' }} />
                           <Tooltip contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px' }} />
                           <Legend wrapperStyle={{ fontSize: '10px' }} />
-                          <Area type="monotone" dataKey="累计产量" name="累计产量(kg)" fill="#8B5A2B33" stroke="#8B5A2B" strokeWidth={2} />
+                          <Area type="monotone" dataKey="累计产量" name="累计脱壳(kg)" fill="#8B5A2B33" stroke="#8B5A2B" strokeWidth={2} />
+                          <Area type="monotone" dataKey="成米产量" name="成米产量(kg)" fill="#2E8B5733" stroke="#2E8B57" strokeWidth={2} />
                         </ComposedChart>
                       </ResponsiveContainer>
                     </Box>

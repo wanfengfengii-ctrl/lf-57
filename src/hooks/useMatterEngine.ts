@@ -10,6 +10,7 @@ import {
   calculateHuskRemovalRate,
   getLeverageMultiplier,
   updateStepperStamina,
+  GRAIN_CONFIGS,
 } from '../utils/physics';
 
 export interface StrikeData {
@@ -21,6 +22,8 @@ export interface StrikeData {
     steps: number;
     stamina: number;
   }[];
+  impactVelocity: number;
+  dropHeight: number;
 }
 
 interface UseMatterEngineOptions {
@@ -457,11 +460,16 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
         const effective = isEffectiveStrike(impactVelocity, dropHeight);
         const impactEnergy = calculateImpactEnergy(impactVelocity);
         const participantCount = mp?.participantCount || 1;
+        const grainType = paramsRef.current.grainType || 'rice';
+        const processingGoal = paramsRef.current.processingGoal || 'balanced';
         const huskRate = calculateHuskRemovalRate(
           impactEnergy,
           paramsRef.current.grainWeight,
           strikeCountRef.current + 1,
-          participantCount
+          participantCount,
+          grainType,
+          processingGoal,
+          dropHeight
         );
 
         const contributingSteppers: number[] = [];
@@ -517,6 +525,8 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
           huskRate,
           contributingSteppers,
           perStepperDelta,
+          impactVelocity,
+          dropHeight,
         });
 
         strikeCooldownRef.current = true;

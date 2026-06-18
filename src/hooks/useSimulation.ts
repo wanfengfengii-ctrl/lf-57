@@ -10,6 +10,8 @@ import type {
   ParticipantCount,
   CooperationStrategy,
   StepperConfig,
+  GrainType,
+  ProcessingGoal,
 } from '../types';
 
 export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
@@ -38,6 +40,8 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     setCooperationStrategy,
     updateStepper,
     setTotalStaminaBudget,
+    setGrainType,
+    setProcessingGoal,
   } = useSimulationStore();
 
   const lastRecordTimeRef = useRef<number>(0);
@@ -48,7 +52,9 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
         data.isEffective,
         data.huskRate,
         data.contributingSteppers,
-        data.perStepperDelta
+        data.perStepperDelta,
+        data.impactVelocity,
+        data.dropHeight
       );
     },
     [addStrike]
@@ -115,7 +121,8 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
   const yieldPerHour = calculateYieldPerHour(state.accumulatedYield, state.elapsedTime);
   const staminaEfficiency = calculateStaminaEfficiency(
     state.accumulatedYield,
-    state.totalStaminaUsed
+    state.totalStaminaUsed,
+    params.processingGoal
   );
 
   const handleSetParticipantCount = useCallback(
@@ -171,5 +178,7 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     setCooperationStrategy: handleSetCooperationStrategy,
     updateStepper: handleUpdateStepper,
     setTotalStaminaBudget,
+    setGrainType,
+    setProcessingGoal,
   };
 }
