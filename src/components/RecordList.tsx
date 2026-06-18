@@ -34,9 +34,10 @@ import {
   PolarRadiusAxis,
   Radar,
 } from 'recharts';
-import type { ExperimentRecord, ParticipantCount, CooperationStrategy, GrainType, ProcessingGoal, EnvironmentPresetId } from '../types';
+import type { ExperimentRecord, ParticipantCount, CooperationStrategy, GrainType, ProcessingGoal, EnvironmentPresetId, MaintenanceStrategy, EquipmentState, EquipmentPartId } from '../types';
 import { getStrategyName } from '../utils/validation';
 import { GRAIN_CONFIGS, GOAL_CONFIGS, ENVIRONMENT_PRESETS } from '../utils/physics';
+import { EQUIPMENT_PARTS, getPartStatusLevel, getStatusColor } from '../utils/equipment';
 
 interface RecordListProps {
   records: ExperimentRecord[];
@@ -73,6 +74,8 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
   const [filterGrain, setFilterGrain] = useState<GrainType | 'all'>('all');
   const [filterGoal, setFilterGoal] = useState<ProcessingGoal | 'all'>('all');
   const [filterEnvPreset, setFilterEnvPreset] = useState<EnvironmentPresetId | 'all'>('all');
+  const [filterMaintenanceStrategy, setFilterMaintenanceStrategy] = useState<MaintenanceStrategy | 'all'>('all');
+  const [filterEquipmentState, setFilterEquipmentState] = useState<'all' | 'good' | 'fair' | 'poor' | 'critical'>('all');
   const [compareMode, setCompareMode] = useState(false);
   const [compareIds, setCompareIds] = useState<string[]>([]);
 
@@ -95,9 +98,24 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
           return false;
         }
       }
+      if (filterMaintenanceStrategy !== 'all') {
+        if (!r.maintenanceStrategy || r.maintenanceStrategy !== filterMaintenanceStrategy) {
+          return false;
+        }
+      }
+      if (filterEquipmentState !== 'all') {
+        if (!r.finalEquipmentState) {
+          return false;
+        }
+        const overallEfficiency = r.finalEquipmentState.overallEfficiency;
+        const level = getPartStatusLevel((1 - overallEfficiency) * 100, 0);
+        if (level !== filterEquipmentState) {
+          return false;
+        }
+      }
       return true;
     });
-  }, [records, filterParticipants, filterStrategy, filterGrain, filterGoal, filterEnvPreset]);
+  }, [records, filterParticipants, filterStrategy, filterGrain, filterGoal, filterEnvPreset, filterMaintenanceStrategy, filterEquipmentState]);
 
   const compareRecords = useMemo(() => {
     return records.filter((r) => compareIds.includes(r.id));
@@ -115,6 +133,9 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
         完整率: r.finalIntegrityRate || 100,
         体力收益: r.staminaYieldRatio || 0,
         最大高度: r.maxHeight * 100,
+        维护成本: r.totalMaintenanceCost || 0,
+        维护次数: r.maintenanceCount || 0,
+        最终效率: (r.finalEquipmentState?.overallEfficiency || 1) * 100,
       };
     });
   }, [compareRecords]);
@@ -357,6 +378,42 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                 color="blue"
               />
             </Group>
+            <Group gap="xs" wrap="wrap">
+              <Group gap="xs">
+                <Zap size={12} color="#DAA520" />
+                <Text size="xs" fw={500} c="wood.7">维护策略:</Text>
+              </Group>
+              <SegmentedControl
+                value={String(filterMaintenanceStrategy)}
+                onChange={(v) => setFilterMaintenanceStrategy(v === 'all' ? 'all' : (v as MaintenanceStrategy))}
+                data={[
+                  { label: '全部', value: 'all' },
+                  { label: '带维护', value: 'withMaintenance' },
+                  { label: '无维护', value: 'withoutMaintenance' },
+                ]}
+                size="xs"
+                color="yellow"
+              />
+            </Group>
+            <Group gap="xs" wrap="wrap">
+              <Group gap="xs">
+                <Target size={12} color="#CD5C5C" />
+                <Text size="xs" fw={500} c="wood.7">器具状态:</Text>
+              </Group>
+              <SegmentedControl
+                value={filterEquipmentState}
+                onChange={(v) => setFilterEquipmentState(v as 'all' | 'good' | 'fair' | 'poor' | 'critical')}
+                data={[
+                  { label: '全部', value: 'all' },
+                  { label: '状态良好', value: 'good' },
+                  { label: '状态一般', value: 'fair' },
+                  { label: '状态较差', value: 'poor' },
+                  { label: '状态危险', value: 'critical' },
+                ]}
+                size="xs"
+                color="red"
+              />
+            </Group>
           </Stack>
 
           {compareMode && compareIds.length > 0 && (
@@ -489,6 +546,15 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                               {ENVIRONMENT_PRESETS[record.environment.presetId]?.icon} {ENVIRONMENT_PRESETS[record.environment.presetId]?.name}
                             </Badge>
                           )}
+                          {record.maintenanceStrategy && (
+                            <Badge
+                              size="xs"
+                              color={record.maintenanceStrategy === 'withMaintenance' ? 'bamboo' : 'terracotta'}
+                              variant="light"
+                            >
+                              {record.maintenanceStrategy === 'withMaintenance' ? '🔧 带维护' : '⚠️ 无维护'}
+                            </Badge>
+                          )}
                         </Group>
                         <Text size="xs" c="wood.5">
                           {formatDate(record.timestamp)}
@@ -532,6 +598,16 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                             {record.staminaYieldRatio?.toFixed(0) || '0'}
                           </Text>
                         </Box>
+                        {record.totalMaintenanceCost !== undefined && (
+                          <Box>
+                            <Text size="xs" c="wood.5">
+                              维护成本
+                            </Text>
+                            <Text size="sm" fw={600} c="#DAA520">
+                              ¥{record.totalMaintenanceCost}
+                            </Text>
+                          </Box>
+                        )}
                       </Group>
 
                       {!compareMode && (
@@ -733,6 +809,30 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                             <Text size="xs" c="wood.5">时长</Text>
                             <Text size="sm" fw={600} c="wood.8">{formatDuration(r.duration)}</Text>
                           </Box>
+                          {r.totalMaintenanceCost !== undefined && (
+                            <Box>
+                              <Text size="xs" c="wood.5">维护成本</Text>
+                              <Text size="sm" fw={600} c="#DAA520">¥{r.totalMaintenanceCost}</Text>
+                            </Box>
+                          )}
+                          {r.maintenanceCount !== undefined && (
+                            <Box>
+                              <Text size="xs" c="wood.5">维护次数</Text>
+                              <Text size="sm" fw={600} c="wood.7">{r.maintenanceCount}次</Text>
+                            </Box>
+                          )}
+                          {r.finalEquipmentState && (
+                            <Box>
+                              <Text size="xs" c="wood.5">最终效率</Text>
+                              <Text
+                                size="sm"
+                                fw={600}
+                                c={getStatusColor(getPartStatusLevel((1 - r.finalEquipmentState.overallEfficiency) * 100, 0))}
+                              >
+                                {(r.finalEquipmentState.overallEfficiency * 100).toFixed(1)}%
+                              </Text>
+                            </Box>
+                          )}
                         </Group>
                       </Box>
                     );
@@ -793,6 +893,87 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                   );
                 })}
               </Group>
+            </Box>
+
+            <Box p="md" style={{ backgroundColor: '#FFF8E7', borderRadius: '8px' }}>
+              <Text size="sm" fw={600} c="wood.7" mb="sm">
+                🔧 器具维护与状态对比
+              </Text>
+              <Group grow mb="sm">
+                {compareRecords.map((r, i) => {
+                  const hasEquipment = r.finalEquipmentState !== undefined;
+                  return (
+                    <Box
+                      key={r.id}
+                      p="xs"
+                      style={{
+                        backgroundColor: `${radarColors[i]}11`,
+                        border: `1px solid ${radarColors[i]}44`,
+                        borderRadius: '6px',
+                      }}
+                    >
+                      <Text size="xs" fw={600} c={radarColors[i]} mb="xs">
+                        {i + 1}. {r.participantCount}人{getStrategyName(r.cooperationStrategy)}
+                      </Text>
+                      {hasEquipment ? (
+                        <Stack gap={2}>
+                          <Group justify="space-between">
+                            <Text size="xs" c="wood.5">维护策略</Text>
+                            <Badge
+                              size="xs"
+                              color={r.maintenanceStrategy === 'withMaintenance' ? 'bamboo' : 'terracotta'}
+                              variant="light"
+                            >
+                              {r.maintenanceStrategy === 'withMaintenance' ? '带维护' : '无维护'}
+                            </Badge>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="xs" c="wood.5">维护成本</Text>
+                            <Text size="xs" fw={500} c="#DAA520">¥{r.totalMaintenanceCost || 0}</Text>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="xs" c="wood.5">维护次数</Text>
+                            <Text size="xs" fw={500} c="wood.7">{r.maintenanceCount || 0}次</Text>
+                          </Group>
+                          <Group justify="space-between">
+                            <Text size="xs" c="wood.5">最终效率</Text>
+                            <Text
+                              size="xs"
+                              fw={500}
+                              c={getStatusColor(getPartStatusLevel((1 - (r.finalEquipmentState?.overallEfficiency || 1)) * 100, 0))}
+                            >
+                              {((r.finalEquipmentState?.overallEfficiency || 1) * 100).toFixed(1)}%
+                            </Text>
+                          </Group>
+                        </Stack>
+                      ) : (
+                        <Text size="xs" c="wood.5">无器具数据</Text>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Group>
+              <Box h={180}>
+                {compareData.length > 0 && compareData.some(d => d.维护成本 > 0 || d.最终效率 < 100) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={compareData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                      <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                      <YAxis yAxisId="left" tick={{ fontSize: 9, fill: '#8B5A2B' }} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: '#8B5A2B' }} domain={[0, 100]} />
+                      <Tooltip contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px', fontSize: '11px' }} />
+                      <Legend wrapperStyle={{ fontSize: '9px' }} />
+                      <Bar yAxisId="left" dataKey="维护成本" name="维护成本(元)" fill="#DAA520" radius={[2, 2, 0, 0]} />
+                      <Bar yAxisId="left" dataKey="维护次数" name="维护次数" fill="#8B5A2B" radius={[2, 2, 0, 0]} />
+                      <Bar yAxisId="right" dataKey="最终效率" name="最终效率(%)" fill="#2E8B57" radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Stack h="100%" align="center" justify="center">
+                    <Text size="xs" c="wood.5">暂无可对比的维护数据</Text>
+                  </Stack>
+                )}
+              </Box>
             </Box>
 
             <Box p="md" style={{ backgroundColor: '#FAF6E8', borderRadius: '8px' }}>
@@ -1015,6 +1196,86 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                       <Text size="xs" c="wood.5">稳定性</Text>
                       <Text size="sm" fw={600} c="#2E8B57">{selectedRecord.environment.groundStability}%</Text>
                     </Box>
+                  </Group>
+                </Stack>
+              </Box>
+            )}
+
+            {selectedRecord.finalEquipmentState && (
+              <Box p="md" style={{ backgroundColor: '#FFF8E7', borderRadius: '8px' }}>
+                <Text size="sm" fw={500} c="wood.7" mb="sm">
+                  🔧 器具状态详情
+                </Text>
+                <Stack gap="sm">
+                  <Group grow>
+                    <Box>
+                      <Text size="xs" c="wood.5">维护策略</Text>
+                      <Badge
+                        size="sm"
+                        color={selectedRecord.maintenanceStrategy === 'withMaintenance' ? 'bamboo' : 'terracotta'}
+                        variant="light"
+                      >
+                        {selectedRecord.maintenanceStrategy === 'withMaintenance' ? '带维护' : '无维护'}
+                      </Badge>
+                    </Box>
+                    <Box>
+                      <Text size="xs" c="wood.5">总维护成本</Text>
+                      <Text size="sm" fw={600} c="#DAA520">¥{selectedRecord.totalMaintenanceCost || 0}</Text>
+                    </Box>
+                    <Box>
+                      <Text size="xs" c="wood.5">维护次数</Text>
+                      <Text size="sm" fw={600} c="wood.8">{selectedRecord.maintenanceCount || 0}次</Text>
+                    </Box>
+                    <Box>
+                      <Text size="xs" c="wood.5">整体效率</Text>
+                      <Text
+                        size="sm"
+                        fw={600}
+                        c={getStatusColor(getPartStatusLevel((1 - selectedRecord.finalEquipmentState.overallEfficiency) * 100, 0))}
+                      >
+                        {(selectedRecord.finalEquipmentState.overallEfficiency * 100).toFixed(1)}%
+                      </Text>
+                    </Box>
+                  </Group>
+                  <Divider c="wood.2" />
+                  <Text size="xs" fw={500} c="wood.6">部件状态详情</Text>
+                  <Group grow>
+                    {(Object.keys(EQUIPMENT_PARTS) as EquipmentPartId[]).map((partId) => {
+                      const part = EQUIPMENT_PARTS[partId];
+                      const partState = selectedRecord.finalEquipmentState?.parts[partId];
+                      if (!partState) return null;
+                      const statusLevel = getPartStatusLevel(partState.wear, partState.looseness);
+                      const statusColor = getStatusColor(statusLevel);
+                      return (
+                        <Box
+                          key={partId}
+                          p="xs"
+                          style={{
+                            backgroundColor: `${statusColor}11`,
+                            borderRadius: '6px',
+                            border: `1px solid ${statusColor}33`,
+                          }}
+                        >
+                          <Text size="xs" fw={600} c={statusColor} ta="center" mb="xs">
+                            {part.icon} {part.name}
+                          </Text>
+                          <Stack gap={2}>
+                            <Group justify="space-between">
+                              <Text size="xs" c="wood.5">磨损</Text>
+                              <Text size="xs" fw={500} c="#CD5C5C">{partState.wear.toFixed(1)}%</Text>
+                            </Group>
+                            <Group justify="space-between">
+                              <Text size="xs" c="wood.5">松动</Text>
+                              <Text size="xs" fw={500} c="#DAA520">{partState.looseness.toFixed(1)}%</Text>
+                            </Group>
+                            <Group justify="space-between">
+                              <Text size="xs" c="wood.5">效率</Text>
+                              <Text size="xs" fw={500} c="#2E8B57">{(partState.efficiencyFactor * 100).toFixed(1)}%</Text>
+                            </Group>
+                          </Stack>
+                        </Box>
+                      );
+                    })}
                   </Group>
                 </Stack>
               </Box>

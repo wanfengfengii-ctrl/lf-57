@@ -14,6 +14,12 @@ import type {
   ProcessingGoal,
   EnvironmentParams,
   EnvironmentPresetId,
+  EquipmentState,
+  EquipmentPartId,
+  MaintenanceAction,
+  MaintenanceStrategy,
+  MaintenanceChallenge,
+  EquipmentEfficiencyPoint,
 } from '../types';
 import {
   getDefaultParams,
@@ -47,6 +53,15 @@ import {
   loadRecords,
   generateRecordId,
 } from '../utils/storage';
+import {
+  getDefaultEquipmentState,
+  updateEquipmentWear,
+  performMaintenance,
+  calculateEquipmentModifiers,
+  EQUIPMENT_PARTS,
+  MAINTENANCE_CHALLENGES,
+  getMaintenanceActions,
+} from '../utils/equipment';
 
 interface SimulationStore {
   params: SimulationParams;
@@ -56,6 +71,10 @@ interface SimulationStore {
   records: ExperimentRecord[];
   challengeTimeRemaining: number;
   challengeStaminaRemaining: number;
+  equipment: EquipmentState;
+  equipmentHistory: EquipmentEfficiencyPoint[];
+  maintenanceChallenge: MaintenanceChallenge | null;
+  maintenanceBudgetRemaining: number;
 
   setParams: (params: Partial<SimulationParams>) => void;
   resetParams: () => void;
@@ -97,6 +116,13 @@ interface SimulationStore {
 
   tick: (deltaTime: number) => void;
   getValidationErrors: () => Record<string, string>;
+
+  setMaintenanceStrategy: (strategy: MaintenanceStrategy) => void;
+  performMaintenanceAction: (action: MaintenanceAction) => boolean;
+  updateEquipmentOnStrike: (strikeCount: number, intensity: number) => void;
+  recordEquipmentPoint: () => void;
+  setMaintenanceChallenge: (challenge: MaintenanceChallenge | null) => void;
+  resetEquipment: () => void;
 }
 
 const getInitialStepperStates = (params: SimulationParams): StepperState[] => {
@@ -153,6 +179,10 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   records: [],
   challengeTimeRemaining: 0,
   challengeStaminaRemaining: 0,
+  equipment: getDefaultEquipmentState('withMaintenance'),
+  equipmentHistory: [],
+  maintenanceChallenge: null,
+  maintenanceBudgetRemaining: 0,
 
   setParams: (newParams) => {
     const current = get();
@@ -361,7 +391,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 
   start: () => {
-    const { currentChallenge, params } = get();
+    const { currentChallenge, params, equipment, maintenanceChallenge } = get();
     const validation = validateParams(get().params);
 
     if (!validation.valid) return;
@@ -374,6 +404,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       },
       challengeTimeRemaining: currentChallenge?.timeLimit || 0,
       challengeStaminaRemaining: currentChallenge?.staminaLimit || 0,
+      equipment: getDefaultEquipmentState(equipment.maintenanceStrategy),
+      equipmentHistory: [],
+      maintenanceBudgetRemaining: maintenanceChallenge?.budgetLimit || 0,
     }));
   },
 
@@ -396,11 +429,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 
   reset: () => {
-    const { currentChallenge, params } = get();
+    const { currentChallenge, params, equipment, maintenanceChallenge } = get();
     set({
       state: getInitialState(params),
       challengeTimeRemaining: currentChallenge?.timeLimit || 0,
       challengeStaminaRemaining: currentChallenge?.staminaLimit || 0,
+      equipment: getDefaultEquipmentState(equipment.maintenanceStrategy),
+      equipmentHistory: [],
+      maintenanceBudgetRemaining: maintenanceChallenge?.budgetLimit || 0,
     });
   },
 
@@ -499,38 +535,43 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     impactVelocity: number = 5,
     dropHeight: number = 0.3
   ) => {
-    const { state, params } = get();
+    const { state, params, equipment } = get();
     const env = params.environment || DEFAULT_ENVIRONMENT;
     const envMods = calculateEnvironmentModifiers(env);
+    const equipMods = calculateEquipmentModifiers(equipment);
 
-    const adjustedHuskRate = applyEnvironmentToHuskRate(huskRate, env);
+    const adjustedHuskRate = applyEnvironmentToHuskRate(huskRate, env) * equipMods.efficiencyMultiplier;
+
+    const adjustedImpactHeight = dropHeight * equipMods.impactHeightMultiplier;
+    const effectiveIsEffective = isEffective && adjustedImpactHeight >= DEFAULT_PHYSICS_CONFIG.MIN_EFFECTIVE_HEIGHT;
 
     const newTotal = state.totalStrikes + 1;
-    const newEffective = state.effectiveStrikes + (isEffective ? 1 : 0);
-    const newHuskRate = isEffective
-      ? (state.currentHuskRate * state.effectiveStrikes + adjustedHuskRate) / newEffective
+    const newEffective = state.effectiveStrikes + (effectiveIsEffective ? 1 : 0);
+    const newHuskRate = effectiveIsEffective
+      ? (state.currentHuskRate * state.effectiveStrikes + Math.min(1, adjustedHuskRate)) / Math.max(1, newEffective)
       : state.currentHuskRate;
 
     const participantCount = params.multiPerson?.participantCount || 1;
-    const newYield = estimateYield(newEffective, params.grainWeight, newHuskRate, participantCount, params.grainType, params.processingGoal);
+    const newYield = estimateYield(newEffective, params.grainWeight, newHuskRate, participantCount, params.grainType, params.processingGoal) * equipMods.strikeQualityMultiplier;
 
-    const impactEnergy = calculateImpactEnergy(impactVelocity);
-    const baseStrikeBreakageRate = isEffective
-      ? calculateBreakageRate(impactEnergy, params.grainWeight, newEffective, params.grainType, params.processingGoal, dropHeight)
+    const impactEnergy = calculateImpactEnergy(impactVelocity) * equipMods.strikeQualityMultiplier;
+    const baseStrikeBreakageRate = effectiveIsEffective
+      ? calculateBreakageRate(impactEnergy, params.grainWeight, newEffective, params.grainType, params.processingGoal, adjustedImpactHeight)
       : state.currentBreakageRate / 100;
 
-    const strikeBreakageRate = isEffective
+    const envBreakageRate = effectiveIsEffective
       ? applyEnvironmentToBreakageRate(baseStrikeBreakageRate, env)
       : baseStrikeBreakageRate;
+    const strikeBreakageRate = envBreakageRate * equipMods.breakageRateMultiplier;
 
-    const newBreakageRate = isEffective
-      ? (state.currentBreakageRate * state.effectiveStrikes + strikeBreakageRate * 100) / newEffective
+    const newBreakageRate = effectiveIsEffective
+      ? (state.currentBreakageRate * state.effectiveStrikes + strikeBreakageRate * 100) / Math.max(1, newEffective)
       : state.currentBreakageRate;
 
     const newIntegrityRate = calculateIntegrityRate(newBreakageRate / 100, newEffective);
     const newRiceYield = calculateRiceYield(newYield, newHuskRate, params.grainType, params.processingGoal, newBreakageRate / 100);
 
-    const processedPerStrike = isEffective ? params.grainWeight * 0.1 * newHuskRate : 0;
+    const processedPerStrike = effectiveIsEffective ? params.grainWeight * 0.1 * newHuskRate : 0;
     const newBroken = state.totalBroken + processedPerStrike * (newBreakageRate / 100);
     const newIntact = state.totalIntact + processedPerStrike * (1 - newBreakageRate / 100);
 
@@ -540,12 +581,13 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       if (!delta) return ss;
 
       const newSteps = ss.totalSteps + delta.steps;
-      const newContributions = ss.effectiveContributions + (isEffective && contributingSteppers.includes(ss.id) ? 1 : 0);
+      const newContributions = ss.effectiveContributions + (effectiveIsEffective && contributingSteppers.includes(ss.id) ? 1 : 0);
       const rawStamina = Math.max(0, Math.min(ss.maxStamina, delta.stamina));
       const staminaDelta = Math.max(0, ss.currentStamina - rawStamina);
       const envAdjustedStaminaDelta = applyEnvironmentToStaminaCost(staminaDelta, env);
-      const newCurrentStamina = Math.max(0, ss.currentStamina - envAdjustedStaminaDelta);
-      newTotalStaminaUsed += envAdjustedStaminaDelta;
+      const equipAdjustedStaminaDelta = envAdjustedStaminaDelta * equipMods.staminaConsumptionMultiplier;
+      const newCurrentStamina = Math.max(0, ss.currentStamina - equipAdjustedStaminaDelta);
+      newTotalStaminaUsed += equipAdjustedStaminaDelta;
 
       return {
         ...ss,
@@ -562,6 +604,9 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     const totalBudget = params.multiPerson?.totalStaminaBudget || 100;
     const budgetRemaining = Math.max(0, totalBudget - newTotalStaminaUsed);
     const newStaminaYieldRatio = calculateStaminaYieldRatio(newRiceYield, newTotalStaminaUsed);
+
+    const intensity = isEffective ? 1.0 : 0.5;
+    const updatedEquipment = updateEquipmentWear(equipment, 1, intensity, 0);
 
     set((state) => ({
       state: {
@@ -580,6 +625,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         totalStaminaUsed: newTotalStaminaUsed,
         staminaBudgetRemaining: Math.max(0, budgetRemaining),
       },
+      equipment: updatedEquipment,
       challengeStaminaRemaining: Math.max(0, budgetRemaining),
     }));
   },
@@ -591,7 +637,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 
   saveCurrentRecord: () => {
-    const { state, params, mode, currentChallenge, records } = get();
+    const { state, params, mode, currentChallenge, records, equipment, equipmentHistory, maintenanceChallenge } = get();
 
     if (state.elapsedTime < 1) return;
 
@@ -645,6 +691,16 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       staminaYieldRatio: state.staminaYieldRatio,
       perPersonStats,
       environment: params.environment ? { ...params.environment } : undefined,
+      maintenanceStrategy: equipment.maintenanceStrategy,
+      totalMaintenanceCost: equipment.totalMaintenanceCost,
+      maintenanceCount: equipment.maintenanceHistory.length,
+      finalEquipmentState: JSON.parse(JSON.stringify(equipment)),
+      equipmentHistory: [...equipmentHistory],
+      maintenanceChallengeId: maintenanceChallenge?.id,
+      maintenanceChallengeSuccess: maintenanceChallenge
+        ? state.accumulatedYield >= maintenanceChallenge.targetYield &&
+          equipment.totalMaintenanceCost <= maintenanceChallenge.budgetLimit
+        : undefined,
     };
 
     const newRecords = addRecord(record);
@@ -769,5 +825,111 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   getValidationErrors: () => {
     const result = validateParams(get().params);
     return result.errors;
+  },
+
+  setMaintenanceStrategy: (strategy) => {
+    const current = get();
+    if (current.state.isRunning) return;
+
+    set({
+      equipment: getDefaultEquipmentState(strategy),
+      equipmentHistory: [],
+    });
+  },
+
+  performMaintenanceAction: (action) => {
+    const current = get();
+    const { equipment, state, maintenanceChallenge, maintenanceBudgetRemaining } = current;
+
+    if (state.isPaused && !state.isRunning) return false;
+
+    if (maintenanceChallenge) {
+      if (maintenanceBudgetRemaining < action.cost) return false;
+    }
+
+    const result = performMaintenance(equipment, action, state.elapsedTime);
+    if (!result.success) return false;
+
+    const newStepperStates = state.stepperStates.map((ss, i) => {
+      const newStamina = Math.max(0, ss.currentStamina - action.staminaCost / (state.stepperStates.length || 1));
+      return { ...ss, currentStamina: newStamina };
+    });
+
+    set((s) => ({
+      equipment: result.state,
+      maintenanceBudgetRemaining: maintenanceChallenge
+        ? Math.max(0, maintenanceBudgetRemaining - action.cost)
+        : maintenanceBudgetRemaining,
+      state: {
+        ...s.state,
+        stepperStates: newStepperStates,
+        totalStaminaUsed: s.state.totalStaminaUsed + action.staminaCost,
+      },
+    }));
+
+    return true;
+  },
+
+  updateEquipmentOnStrike: (strikeCount, intensity) => {
+    const current = get();
+    const { equipment, state } = current;
+
+    if (equipment.maintenanceStrategy === 'withoutMaintenance') {
+      const updated = updateEquipmentWear(equipment, strikeCount, intensity, 0);
+      set({ equipment: updated });
+    } else {
+      const updated = updateEquipmentWear(equipment, strikeCount, intensity * 0.8, 0);
+      set({ equipment: updated });
+    }
+  },
+
+  recordEquipmentPoint: () => {
+    const current = get();
+    const { equipment, state, equipmentHistory } = current;
+
+    if (state.elapsedTime <= 0) return;
+
+    const partsData: any = {};
+    (Object.keys(equipment.parts) as EquipmentPartId[]).forEach((id) => {
+      const part = equipment.parts[id];
+      partsData[id] = {
+        wear: part.wear,
+        looseness: part.looseness,
+        efficiency: part.efficiencyFactor,
+      };
+    });
+
+    const point: EquipmentEfficiencyPoint = {
+      time: Math.round(state.elapsedTime * 10) / 10,
+      overallEfficiency: equipment.overallEfficiency,
+      parts: partsData,
+      maintenanceCost: equipment.totalMaintenanceCost,
+      maintenanceCount: equipment.maintenanceHistory.length,
+    };
+
+    set({
+      equipmentHistory: [...equipmentHistory, point],
+    });
+  },
+
+  setMaintenanceChallenge: (challenge) => {
+    const current = get();
+    if (current.state.isRunning) return;
+
+    set({
+      maintenanceChallenge: challenge,
+      maintenanceBudgetRemaining: challenge?.budgetLimit || 0,
+      equipment: getDefaultEquipmentState('withMaintenance'),
+      equipmentHistory: [],
+    });
+  },
+
+  resetEquipment: () => {
+    const current = get();
+    set({
+      equipment: getDefaultEquipmentState(current.equipment.maintenanceStrategy),
+      equipmentHistory: [],
+      maintenanceBudgetRemaining: current.maintenanceChallenge?.budgetLimit || 0,
+    });
   },
 }));

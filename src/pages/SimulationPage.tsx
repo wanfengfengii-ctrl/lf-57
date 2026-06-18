@@ -18,6 +18,8 @@ import { RecordList } from '../components/RecordList';
 import { GrainSelector } from '../components/GrainSelector';
 import { GrainMetrics } from '../components/GrainMetrics';
 import { EnvironmentPanel } from '../components/EnvironmentPanel';
+import { EquipmentPanel } from '../components/EquipmentPanel';
+import { MaintenancePanel } from '../components/MaintenancePanel';
 import { useSimulationStore } from '../store/simulationStore';
 import type { EnvironmentPresetId } from '../types';
 
@@ -38,6 +40,10 @@ export function SimulationPage() {
     currentChallenge,
     challengeTimeRemaining,
     challengeStaminaRemaining,
+    equipment,
+    equipmentHistory,
+    maintenanceChallenge,
+    maintenanceBudgetRemaining,
     effectiveRate,
     yieldPerHour,
     staminaEfficiency,
@@ -61,6 +67,9 @@ export function SimulationPage() {
     setProcessingGoal,
     setEnvironment,
     setEnvironmentPreset,
+    setMaintenanceStrategy,
+    performMaintenanceAction,
+    setMaintenanceChallenge,
   } = useSimulation(canvasRef);
 
   const errors = getValidationErrors();
@@ -152,6 +161,22 @@ export function SimulationPage() {
                 />
               </Paper>
             </Box>
+
+            <Box mt="lg">
+              <MaintenancePanel
+                equipment={equipment}
+                maintenanceStrategy={equipment.maintenanceStrategy}
+                maintenanceChallenge={maintenanceChallenge}
+                maintenanceBudgetRemaining={maintenanceBudgetRemaining}
+                isRunning={state.isRunning}
+                isPaused={state.isPaused}
+                strikeFrequency={state.totalStrikes / (state.elapsedTime || 1)}
+                onStrategyChange={setMaintenanceStrategy}
+                onPerformMaintenance={performMaintenanceAction}
+                onChallengeChange={setMaintenanceChallenge}
+                disabled={state.isRunning && !state.isPaused}
+              />
+            </Box>
           </Grid.Col>
 
           <Grid.Col span={{ base: 12, md: 6 }}>
@@ -197,6 +222,9 @@ export function SimulationPage() {
                 <Tabs.Tab value="stats" size="sm">
                   📊 统计
                 </Tabs.Tab>
+                <Tabs.Tab value="equipment" size="sm">
+                  🔧 器具
+                </Tabs.Tab>
                 <Tabs.Tab value="records" size="sm">
                   📋 记录
                 </Tabs.Tab>
@@ -216,6 +244,15 @@ export function SimulationPage() {
                   steppers={params.multiPerson?.steppers || []}
                   allRecords={records}
                   environment={params.environment}
+                />
+              </Tabs.Panel>
+
+              <Tabs.Panel value="equipment">
+                <EquipmentPanel
+                  equipment={equipment}
+                  equipmentHistory={equipmentHistory}
+                  isRunning={state.isRunning}
+                  isPaused={state.isPaused}
                 />
               </Tabs.Panel>
 

@@ -186,6 +186,13 @@ export interface ExperimentRecord {
     contributionRate: number;
   }[];
   environment?: EnvironmentParams;
+  maintenanceStrategy?: MaintenanceStrategy;
+  totalMaintenanceCost?: number;
+  maintenanceCount?: number;
+  finalEquipmentState?: EquipmentState;
+  equipmentHistory?: EquipmentEfficiencyPoint[];
+  maintenanceChallengeId?: string;
+  maintenanceChallengeSuccess?: boolean;
 }
 
 export interface ValidationResult {
@@ -210,4 +217,96 @@ export interface StrikeEvent {
   isEffective: boolean;
   huskRemovalRate: number;
   contributingSteppers: number[];
+}
+
+export type EquipmentPartId = 'pedal' | 'pivot' | 'connectingRod' | 'pestleHead';
+
+export interface EquipmentPart {
+  id: EquipmentPartId;
+  name: string;
+  icon: string;
+  description: string;
+  baseWearRate: number;
+  baseLoosenRate: number;
+  maxWear: number;
+  maxLooseness: number;
+  replaceCost: number;
+  reinforceCost: number;
+  lubricateCost: number;
+}
+
+export interface EquipmentPartState {
+  id: EquipmentPartId;
+  wear: number;
+  looseness: number;
+  efficiencyFactor: number;
+  totalStrikes: number;
+  lastMaintenanceTime: number;
+  maintenanceCount: number;
+}
+
+export type MaintenanceActionType = 'reinforce' | 'lubricate' | 'replace';
+
+export interface MaintenanceAction {
+  type: MaintenanceActionType;
+  targetPart: EquipmentPartId;
+  cost: number;
+  description: string;
+  wearReduction: number;
+  loosenessReduction: number;
+  staminaCost: number;
+}
+
+export type MaintenanceStrategy = 'withMaintenance' | 'withoutMaintenance';
+
+export interface MaintenanceRecord {
+  id: string;
+  timestamp: number;
+  action: MaintenanceActionType;
+  targetPart: EquipmentPartId;
+  cost: number;
+  staminaUsed: number;
+  wearBefore: number;
+  wearAfter: number;
+  loosenessBefore: number;
+  loosenessAfter: number;
+}
+
+export interface EquipmentState {
+  parts: Record<EquipmentPartId, EquipmentPartState>;
+  overallEfficiency: number;
+  totalMaintenanceCost: number;
+  maintenanceHistory: MaintenanceRecord[];
+  maintenanceStrategy: MaintenanceStrategy;
+  lastUpdateTime: number;
+}
+
+export interface MaintenanceChallenge {
+  id: string;
+  name: string;
+  description: string;
+  targetYield: number;
+  budgetLimit: number;
+  timeLimit?: number;
+  difficulty: 'easy' | 'medium' | 'hard';
+}
+
+export interface EquipmentModifiers {
+  impactHeightMultiplier: number;
+  efficiencyMultiplier: number;
+  breakageRateMultiplier: number;
+  staminaConsumptionMultiplier: number;
+  strikeQualityMultiplier: number;
+}
+
+export interface EquipmentEfficiencyPoint {
+  time: number;
+  overallEfficiency: number;
+  parts: Record<EquipmentPartId, {
+    wear: number;
+    looseness: number;
+    efficiency: number;
+  }>;
+  maintenanceCost: number;
+  maintenanceCount: number;
 }

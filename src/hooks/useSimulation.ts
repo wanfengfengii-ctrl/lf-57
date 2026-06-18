@@ -14,6 +14,9 @@ import type {
   ProcessingGoal,
   EnvironmentParams,
   EnvironmentPresetId,
+  MaintenanceStrategy,
+  MaintenanceAction,
+  MaintenanceChallenge,
 } from '../types';
 
 export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
@@ -24,6 +27,10 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     currentChallenge,
     challengeTimeRemaining,
     challengeStaminaRemaining,
+    equipment,
+    equipmentHistory,
+    maintenanceChallenge,
+    maintenanceBudgetRemaining,
     setParams,
     resetParams,
     start,
@@ -46,6 +53,12 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     setProcessingGoal,
     setEnvironment,
     setEnvironmentPreset,
+    setMaintenanceStrategy,
+    performMaintenanceAction,
+    updateEquipmentOnStrike,
+    recordEquipmentPoint,
+    setMaintenanceChallenge,
+    resetEquipment,
   } = useSimulationStore();
 
   const lastRecordTimeRef = useRef<number>(0);
@@ -156,6 +169,35 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     [updateStepper]
   );
 
+  const handleSetProcessingGoal = useCallback(
+    (goal: ProcessingGoal) => {
+      setProcessingGoal(goal);
+    },
+    [setProcessingGoal]
+  );
+
+  const handleSetMaintenanceStrategy = useCallback(
+    (strategy: MaintenanceStrategy) => {
+      setMaintenanceStrategy(strategy);
+    },
+    [setMaintenanceStrategy]
+  );
+
+  const handlePerformMaintenanceAction = useCallback(
+    (action: MaintenanceAction) => {
+      return performMaintenanceAction(action);
+    },
+    [performMaintenanceAction]
+  );
+
+  const handleSetMaintenanceChallenge = useCallback(
+    (challenge: MaintenanceChallenge | null) => {
+      setMaintenanceChallenge(challenge);
+      rebuildScene();
+    },
+    [setMaintenanceChallenge, rebuildScene]
+  );
+
   return {
     params,
     state,
@@ -163,6 +205,10 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     currentChallenge,
     challengeTimeRemaining,
     challengeStaminaRemaining,
+    equipment,
+    equipmentHistory,
+    maintenanceChallenge,
+    maintenanceBudgetRemaining,
     effectiveRate,
     yieldPerHour,
     staminaEfficiency,
@@ -186,5 +232,9 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     setProcessingGoal,
     setEnvironment,
     setEnvironmentPreset,
+    setMaintenanceStrategy: handleSetMaintenanceStrategy,
+    performMaintenanceAction: handlePerformMaintenanceAction,
+    setMaintenanceChallenge: handleSetMaintenanceChallenge,
+    resetEquipment,
   };
 }
