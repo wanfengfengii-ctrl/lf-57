@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useSimulationStore } from '../store/simulationStore';
-import { useMatterEngine } from './useMatterEngine';
-import { calculateEffectiveRate, calculateYieldPerHour } from '../utils/physics';
+import { useMatterEngine, StrikeData } from './useMatterEngine';
+import {
+  calculateEffectiveRate,
+  calculateYieldPerHour,
+  calculateStaminaEfficiency,
+} from '../utils/physics';
+import type {
+  ParticipantCount,
+  CooperationStrategy,
+  StepperConfig,
+} from '../types';
 
 export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
   const {
@@ -10,6 +19,7 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     mode,
     currentChallenge,
     challengeTimeRemaining,
+    challengeStaminaRemaining,
     setParams,
     resetParams,
     start,
@@ -24,13 +34,22 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     saveCurrentRecord,
     tick,
     getValidationErrors,
+    setParticipantCount,
+    setCooperationStrategy,
+    updateStepper,
+    setTotalStaminaBudget,
   } = useSimulationStore();
 
   const lastRecordTimeRef = useRef<number>(0);
 
   const handleStrike = useCallback(
-    (isEffective: boolean, huskRate: number) => {
-      addStrike(isEffective, huskRate);
+    (data: StrikeData) => {
+      addStrike(
+        data.isEffective,
+        data.huskRate,
+        data.contributingSteppers,
+        data.perStepperDelta
+      );
     },
     [addStrike]
   );
@@ -46,7 +65,7 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
   );
 
   const handlePhysicsTick = useCallback(
-    (deltaTime: number) => {
+    (deltaTime: number, perStepperForce: number[]) => {
       if (!state.isRunning || state.isPaused) return;
 
       tick(deltaTime);
@@ -65,6 +84,7 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     params,
     isRunning: state.isRunning,
     isPaused: state.isPaused,
+    stepperStates: state.stepperStates,
     onStrike: handleStrike,
     onHeightUpdate: handleHeightUpdate,
     onPhysicsTick: handlePhysicsTick,
@@ -93,6 +113,37 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
 
   const effectiveRate = calculateEffectiveRate(state.totalStrikes, state.effectiveStrikes);
   const yieldPerHour = calculateYieldPerHour(state.accumulatedYield, state.elapsedTime);
+  const staminaEfficiency = calculateStaminaEfficiency(
+    state.accumulatedYield,
+    state.totalStaminaUsed
+  );
+
+  const handleSetParticipantCount = useCallback(
+    (count: ParticipantCount) => {
+      setParticipantCount(count);
+      setTimeout(() => {
+        rebuildScene();
+      }, 0);
+    },
+    [setParticipantCount, rebuildScene]
+  );
+
+  const handleSetCooperationStrategy = useCallback(
+    (strategy: CooperationStrategy) => {
+      setCooperationStrategy(strategy);
+      setTimeout(() => {
+        rebuildScene();
+      }, 0);
+    },
+    [setCooperationStrategy, rebuildScene]
+  );
+
+  const handleUpdateStepper = useCallback(
+    (id: number, updates: Partial<StepperConfig>) => {
+      updateStepper(id, updates);
+    },
+    [updateStepper]
+  );
 
   return {
     params,
@@ -100,8 +151,10 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     mode,
     currentChallenge,
     challengeTimeRemaining,
+    challengeStaminaRemaining,
     effectiveRate,
     yieldPerHour,
+    staminaEfficiency,
     canvasWidth,
     canvasHeight,
     setParams,
@@ -114,5 +167,9 @@ export function useSimulation(canvasRef: React.RefObject<HTMLCanvasElement>) {
     setChallenge,
     saveCurrentRecord,
     getValidationErrors,
+    setParticipantCount: handleSetParticipantCount,
+    setCooperationStrategy: handleSetCooperationStrategy,
+    updateStepper: handleUpdateStepper,
+    setTotalStaminaBudget,
   };
 }

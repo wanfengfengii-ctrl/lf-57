@@ -6,12 +6,23 @@ import type {
   ExperimentRecord,
   EfficiencyPoint,
   ChallengeConfig,
+  StepperState,
+  StepperConfig,
+  ParticipantCount,
+  CooperationStrategy,
 } from '../types';
-import { getDefaultParams, validateParams } from '../utils/validation';
+import {
+  getDefaultParams,
+  validateParams,
+  getDefaultMultiPersonParams,
+  getDefaultStepperConfig,
+  applyStrategyPhaseOffsets,
+} from '../utils/validation';
 import {
   calculateEffectiveRate,
   calculateYieldPerHour,
   estimateYield,
+  calculateStaminaEfficiency,
 } from '../utils/physics';
 import {
   addRecord,
@@ -27,9 +38,14 @@ interface SimulationStore {
   currentChallenge: ChallengeConfig | null;
   records: ExperimentRecord[];
   challengeTimeRemaining: number;
+  challengeStaminaRemaining: number;
 
   setParams: (params: Partial<SimulationParams>) => void;
   resetParams: () => void;
+  setParticipantCount: (count: ParticipantCount) => void;
+  setCooperationStrategy: (strategy: CooperationStrategy) => void;
+  updateStepper: (id: number, updates: Partial<StepperConfig>) => void;
+  setTotalStaminaBudget: (budget: number) => void;
 
   start: () => void;
   pause: () => void;
@@ -40,8 +56,15 @@ interface SimulationStore {
   setChallenge: (challenge: ChallengeConfig | null) => void;
 
   updateSimulationState: (updates: Partial<SimulationState>) => void;
+  updateStepperStates: (states: StepperState[]) => void;
   recordEfficiencyPoint: () => void;
-  addStrike: (isEffective: boolean, huskRate: number) => void;
+  addStrike: (
+    isEffective: boolean,
+    huskRate: number,
+    contributingSteppers: number[],
+    perStepperDelta: { id: number; steps: number; stamina: number }[]
+  ) => void;
+  consumeStamina: (amount: number) => void;
 
   saveCurrentRecord: () => void;
   removeRecord: (id: string) => void;
@@ -53,26 +76,54 @@ interface SimulationStore {
   getValidationErrors: () => Record<string, string>;
 }
 
-const getInitialState = (): SimulationState => ({
-  isRunning: false,
-  isPaused: false,
-  elapsedTime: 0,
-  totalStrikes: 0,
-  effectiveStrikes: 0,
-  currentHeight: 0,
-  maxHeight: 0,
-  accumulatedYield: 0,
-  currentHuskRate: 0,
-  efficiencyHistory: [],
-});
+const getInitialStepperStates = (params: SimulationParams): StepperState[] => {
+  const mp = params.multiPerson;
+  if (!mp) return [];
+
+  const perPersonBudget = mp.totalStaminaBudget / mp.participantCount;
+  return mp.steppers.map((stepper) => ({
+    id: stepper.id,
+    currentStamina: perPersonBudget,
+    maxStamina: perPersonBudget,
+    totalSteps: 0,
+    effectiveContributions: 0,
+    staminaHistory: [],
+  }));
+};
+
+const getInitialState = (params?: SimulationParams): SimulationState => {
+  const baseState: SimulationState = {
+    isRunning: false,
+    isPaused: false,
+    elapsedTime: 0,
+    totalStrikes: 0,
+    effectiveStrikes: 0,
+    currentHeight: 0,
+    maxHeight: 0,
+    accumulatedYield: 0,
+    currentHuskRate: 0,
+    efficiencyHistory: [],
+    stepperStates: [],
+    totalStaminaUsed: 0,
+    staminaBudgetRemaining: params?.multiPerson?.totalStaminaBudget || 100,
+  };
+
+  if (params) {
+    baseState.stepperStates = getInitialStepperStates(params);
+    baseState.staminaBudgetRemaining = params.multiPerson?.totalStaminaBudget || 100;
+  }
+
+  return baseState;
+};
 
 export const useSimulationStore = create<SimulationStore>((set, get) => ({
   params: getDefaultParams(),
-  state: getInitialState(),
+  state: getInitialState(getDefaultParams()),
   mode: 'free',
   currentChallenge: null,
   records: [],
   challengeTimeRemaining: 0,
+  challengeStaminaRemaining: 0,
 
   setParams: (newParams) => {
     const current = get();
@@ -89,31 +140,146 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     } else {
       set({
         params: updatedParams,
-        state: getInitialState(),
+        state: getInitialState(updatedParams),
       });
     }
   },
 
   resetParams: () => {
+    const defaultParams = getDefaultParams();
     set({
-      params: getDefaultParams(),
-      state: getInitialState(),
+      params: defaultParams,
+      state: getInitialState(defaultParams),
+    });
+  },
+
+  setParticipantCount: (count: ParticipantCount) => {
+    const current = get();
+    const currentMp = current.params.multiPerson || getDefaultMultiPersonParams(1, 'alternating');
+
+    const newSteppers: StepperConfig[] = [];
+    for (let i = 0; i < count; i++) {
+      if (currentMp.steppers[i]) {
+        newSteppers.push({ ...currentMp.steppers[i] });
+      } else {
+        newSteppers.push(getDefaultStepperConfig(i, count));
+      }
+    }
+
+    applyStrategyPhaseOffsets(newSteppers, currentMp.cooperationStrategy);
+
+    const totalBudget = 100 * count;
+    const updatedMp = {
+      ...currentMp,
+      participantCount: count,
+      steppers: newSteppers,
+      totalStaminaBudget: totalBudget,
+    };
+
+    const updatedParams = {
+      ...current.params,
+      multiPerson: updatedMp,
+    };
+
+    set({
+      params: updatedParams,
+      state: {
+        ...getInitialState(updatedParams),
+        isRunning: false,
+      },
+    });
+  },
+
+  setCooperationStrategy: (strategy: CooperationStrategy) => {
+    const current = get();
+    if (!current.params.multiPerson) return;
+
+    const newSteppers = current.params.multiPerson.steppers.map((s) => ({ ...s }));
+    applyStrategyPhaseOffsets(newSteppers, strategy);
+
+    const updatedMp = {
+      ...current.params.multiPerson,
+      cooperationStrategy: strategy,
+      steppers: newSteppers,
+    };
+
+    const updatedParams = {
+      ...current.params,
+      multiPerson: updatedMp,
+    };
+
+    if (current.state.isRunning) {
+      set({ params: updatedParams });
+    } else {
+      set({
+        params: updatedParams,
+        state: getInitialState(updatedParams),
+      });
+    }
+  },
+
+  updateStepper: (id: number, updates: Partial<StepperConfig>) => {
+    const current = get();
+    if (!current.params.multiPerson) return;
+
+    const newSteppers = current.params.multiPerson.steppers.map((s) =>
+      s.id === id ? { ...s, ...updates } : s
+    );
+
+    const updatedMp = {
+      ...current.params.multiPerson,
+      steppers: newSteppers,
+    };
+
+    const updatedParams = {
+      ...current.params,
+      multiPerson: updatedMp,
+    };
+
+    if (current.state.isRunning) {
+      set({ params: updatedParams });
+    } else {
+      set({
+        params: updatedParams,
+        state: getInitialState(updatedParams),
+      });
+    }
+  },
+
+  setTotalStaminaBudget: (budget: number) => {
+    const current = get();
+    if (!current.params.multiPerson) return;
+
+    const updatedMp = {
+      ...current.params.multiPerson,
+      totalStaminaBudget: budget,
+    };
+
+    const updatedParams = {
+      ...current.params,
+      multiPerson: updatedMp,
+    };
+
+    set({
+      params: updatedParams,
+      state: getInitialState(updatedParams),
     });
   },
 
   start: () => {
-    const { currentChallenge } = get();
+    const { currentChallenge, params } = get();
     const validation = validateParams(get().params);
 
     if (!validation.valid) return;
 
     set((state) => ({
       state: {
-        ...getInitialState(),
+        ...getInitialState(params),
         isRunning: true,
         isPaused: false,
       },
       challengeTimeRemaining: currentChallenge?.timeLimit || 0,
+      challengeStaminaRemaining: currentChallenge?.staminaLimit || 0,
     }));
   },
 
@@ -136,27 +302,32 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 
   reset: () => {
-    const { currentChallenge } = get();
+    const { currentChallenge, params } = get();
     set({
-      state: getInitialState(),
+      state: getInitialState(params),
       challengeTimeRemaining: currentChallenge?.timeLimit || 0,
+      challengeStaminaRemaining: currentChallenge?.staminaLimit || 0,
     });
   },
 
   setMode: (mode) => {
+    const { params } = get();
     set({
       mode,
-      state: getInitialState(),
+      state: getInitialState(params),
       currentChallenge: null,
       challengeTimeRemaining: 0,
+      challengeStaminaRemaining: 0,
     });
   },
 
   setChallenge: (challenge) => {
+    const { params } = get();
     set({
       currentChallenge: challenge,
       challengeTimeRemaining: challenge?.timeLimit || 0,
-      state: getInitialState(),
+      challengeStaminaRemaining: challenge?.staminaLimit || 0,
+      state: getInitialState(params),
     });
   },
 
@@ -169,11 +340,22 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     }));
   },
 
+  updateStepperStates: (states: StepperState[]) => {
+    set((state) => ({
+      state: {
+        ...state.state,
+        stepperStates: states,
+      },
+    }));
+  },
+
   recordEfficiencyPoint: () => {
     const { state, params } = get();
-    const { elapsedTime, totalStrikes, effectiveStrikes, accumulatedYield } = state;
+    const { elapsedTime, totalStrikes, effectiveStrikes, accumulatedYield, totalStaminaUsed } = state;
 
     if (elapsedTime <= 0) return;
+
+    const participantCount = params.multiPerson?.participantCount || 1;
 
     const point: EfficiencyPoint = {
       time: Math.round(elapsedTime * 10) / 10,
@@ -181,6 +363,11 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       yieldPerHour: calculateYieldPerHour(accumulatedYield, elapsedTime),
       totalStrikes,
       effectiveStrikes,
+      staminaUsed: totalStaminaUsed,
+      perPersonYield: state.stepperStates.map((ss, i) =>
+        (accumulatedYield * ss.effectiveContributions) /
+        Math.max(1, effectiveStrikes)
+      ),
     };
 
     set((state) => ({
@@ -191,7 +378,12 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     }));
   },
 
-  addStrike: (isEffective: boolean, huskRate: number) => {
+  addStrike: (
+    isEffective: boolean,
+    huskRate: number,
+    contributingSteppers: number[],
+    perStepperDelta: { id: number; steps: number; stamina: number }[]
+  ) => {
     const { state, params } = get();
 
     const newTotal = state.totalStrikes + 1;
@@ -200,7 +392,32 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       ? (state.currentHuskRate * state.effectiveStrikes + huskRate) / newEffective
       : state.currentHuskRate;
 
-    const newYield = estimateYield(newEffective, params.grainWeight, newHuskRate);
+    const participantCount = params.multiPerson?.participantCount || 1;
+    const newYield = estimateYield(newEffective, params.grainWeight, newHuskRate, participantCount);
+
+    let newTotalStaminaUsed = state.totalStaminaUsed;
+    const newStepperStates = state.stepperStates.map((ss) => {
+      const delta = perStepperDelta.find((d) => d.id === ss.id);
+      if (!delta) return ss;
+
+      const newSteps = ss.totalSteps + delta.steps;
+      const newContributions = ss.effectiveContributions + (isEffective && contributingSteppers.includes(ss.id) ? 1 : 0);
+      const staminaUsed = Math.max(0, ss.maxStamina - delta.stamina);
+      newTotalStaminaUsed += Math.max(0, delta.stamina > 0 ? 0 : -delta.stamina);
+
+      return {
+        ...ss,
+        totalSteps: newSteps,
+        currentStamina: Math.max(0, Math.min(ss.maxStamina, delta.stamina)),
+        effectiveContributions: newContributions,
+        staminaHistory: [
+          ...ss.staminaHistory,
+          { time: state.elapsedTime, stamina: delta.stamina },
+        ].slice(-120),
+      };
+    });
+
+    const budgetRemaining = (params.multiPerson?.totalStaminaBudget || 100) - newTotalStaminaUsed;
 
     set((state) => ({
       state: {
@@ -209,7 +426,16 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         effectiveStrikes: newEffective,
         accumulatedYield: newYield,
         currentHuskRate: newHuskRate,
+        stepperStates: newStepperStates,
+        totalStaminaUsed: newTotalStaminaUsed,
+        staminaBudgetRemaining: Math.max(0, budgetRemaining),
       },
+    }));
+  },
+
+  consumeStamina: (amount: number) => {
+    set((state) => ({
+      challengeStaminaRemaining: Math.max(0, state.challengeStaminaRemaining - amount),
     }));
   },
 
@@ -218,24 +444,49 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
     if (state.elapsedTime < 1) return;
 
+    const participantCount = params.multiPerson?.participantCount || 1;
+    const strategy = params.multiPerson?.cooperationStrategy || 'independent';
+
+    const perPersonStats = state.stepperStates.map((ss, i) => {
+      const config = params.multiPerson?.steppers[i];
+      const totalStamina = ss.maxStamina - ss.currentStamina + state.totalStaminaUsed * (1 / participantCount);
+      return {
+        id: ss.id,
+        name: config?.name || `${i + 1}号`,
+        steps: ss.totalSteps,
+        staminaUsed: totalStamina,
+        contributionRate:
+          state.effectiveStrikes > 0
+            ? (ss.effectiveContributions / state.effectiveStrikes) * 100
+            : 0,
+      };
+    });
+
     const record: ExperimentRecord = {
       id: generateRecordId(),
       timestamp: Date.now(),
-      params: { ...params },
+      params: JSON.parse(JSON.stringify(params)),
       mode,
       duration: state.elapsedTime,
       totalStrikes: state.totalStrikes,
       effectiveStrikes: state.effectiveStrikes,
       finalYield: state.accumulatedYield,
-      avgEfficiency: state.effectiveStrikes > 0
-        ? state.accumulatedYield / state.elapsedTime
-        : 0,
+      avgEfficiency:
+        state.effectiveStrikes > 0 ? state.accumulatedYield / state.elapsedTime : 0,
       maxHeight: state.maxHeight,
       challengeId: currentChallenge?.id,
       challengeSuccess: currentChallenge
-        ? state.accumulatedYield >= currentChallenge.targetYield
+        ? currentChallenge.type === 'timeLimit'
+          ? state.accumulatedYield >= currentChallenge.targetYield
+          : state.accumulatedYield >= currentChallenge.targetYield &&
+            state.totalStaminaUsed <= (currentChallenge.staminaLimit || Infinity)
         : undefined,
       efficiencyHistory: [...state.efficiencyHistory],
+      participantCount: participantCount as ParticipantCount,
+      cooperationStrategy: strategy,
+      totalStaminaUsed: state.totalStaminaUsed,
+      staminaEfficiency: calculateStaminaEfficiency(state.accumulatedYield, state.totalStaminaUsed),
+      perPersonStats,
     };
 
     const newRecords = addRecord(record);
@@ -250,21 +501,38 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   loadRecord: (id: string) => {
     const record = get().records.find((r) => r.id === id);
     if (record) {
-      const avgHuskRate = record.effectiveStrikes > 0
-        ? (record.finalYield / (record.effectiveStrikes * record.params.grainWeight * 0.1 * 0.7))
-        : 0;
+      const avgHuskRate =
+        record.effectiveStrikes > 0
+          ? record.finalYield /
+            (record.effectiveStrikes * record.params.grainWeight * 0.1 * 0.7)
+          : 0;
+
+      const mp = record.params.multiPerson || getDefaultMultiPersonParams(1, 'alternating');
+      const perPersonBudget = mp.totalStaminaBudget / mp.participantCount;
 
       set({
-        params: { ...record.params },
+        params: JSON.parse(JSON.stringify(record.params)),
         state: {
-          ...getInitialState(),
+          ...getInitialState(record.params),
           elapsedTime: record.duration,
           totalStrikes: record.totalStrikes,
           effectiveStrikes: record.effectiveStrikes,
           accumulatedYield: record.finalYield,
           maxHeight: record.maxHeight,
           currentHuskRate: Math.max(0, Math.min(1, avgHuskRate)),
-          efficiencyHistory: record.efficiencyHistory ? [...record.efficiencyHistory] : [],
+          efficiencyHistory: record.efficiencyHistory
+            ? [...record.efficiencyHistory]
+            : [],
+          stepperStates: record.perPersonStats?.map((ps, i) => ({
+            id: ps.id,
+            currentStamina: Math.max(0, perPersonBudget - ps.staminaUsed),
+            maxStamina: perPersonBudget,
+            totalSteps: ps.steps,
+            effectiveContributions: Math.floor((ps.contributionRate / 100) * record.effectiveStrikes),
+            staminaHistory: [],
+          })) || getInitialStepperStates(record.params),
+          totalStaminaUsed: record.totalStaminaUsed,
+          staminaBudgetRemaining: Math.max(0, mp.totalStaminaBudget - record.totalStaminaUsed),
         },
         mode: record.mode,
       });
@@ -282,7 +550,13 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 
   tick: (deltaTime: number) => {
-    const { state, mode, currentChallenge, challengeTimeRemaining } = get();
+    const {
+      state,
+      mode,
+      currentChallenge,
+      challengeTimeRemaining,
+      challengeStaminaRemaining,
+    } = get();
 
     if (!state.isRunning || state.isPaused) return;
 
@@ -291,8 +565,14 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
     let shouldStop = false;
 
     if (mode === 'challenge' && currentChallenge) {
-      if (newTimeRemaining <= 0) {
+      if (currentChallenge.type === 'timeLimit' && newTimeRemaining <= 0) {
         newTimeRemaining = 0;
+        shouldStop = true;
+      }
+      if (
+        currentChallenge.type === 'staminaLimit' &&
+        state.staminaBudgetRemaining <= 0
+      ) {
         shouldStop = true;
       }
       if (state.accumulatedYield >= currentChallenge.targetYield) {
@@ -300,13 +580,20 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       }
     }
 
-    set((state) => ({
+    const allExhausted =
+      state.stepperStates.length > 0 &&
+      state.stepperStates.every((s) => s.currentStamina <= 0);
+    if (allExhausted && state.stepperStates.length > 0) {
+      shouldStop = true;
+    }
+
+    set((s) => ({
       state: {
-        ...state.state,
+        ...s.state,
         elapsedTime: newElapsed,
-        isRunning: shouldStop ? false : state.state.isRunning,
+        isRunning: shouldStop ? false : s.state.isRunning,
       },
-      challengeTimeRemaining: newTimeRemaining,
+      challengeTimeRemaining: Math.max(0, newTimeRemaining),
     }));
   },
 

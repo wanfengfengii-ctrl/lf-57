@@ -1,8 +1,9 @@
 import { useRef, useEffect } from 'react';
-import { Card, Group, Text, Badge, Stack, Box, Progress } from '@mantine/core';
-import { Play, Pause, RotateCcw, ArrowRight } from 'lucide-react';
+import { Card, Group, Text, Badge, Stack, Box, Progress, Divider } from '@mantine/core';
+import { Play, Pause, RotateCcw, ArrowRight, Users, Heart, Activity } from 'lucide-react';
 import type { SimulationState, SimulationParams, ChallengeConfig } from '../types';
 import { DEFAULT_PHYSICS_CONFIG } from '../utils/physics';
+import { getStrategyName } from '../utils/validation';
 
 interface SimulationSceneProps {
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -15,6 +16,8 @@ interface SimulationSceneProps {
   mode: 'free' | 'challenge';
   currentChallenge: ChallengeConfig | null;
   challengeTimeRemaining: number;
+  challengeStaminaRemaining: number;
+  staminaEfficiency: number;
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -22,6 +25,12 @@ interface SimulationSceneProps {
   onSave: () => void;
   errors: Record<string, string>;
 }
+
+const STEPPER_COLORS: Record<number, string> = {
+  1: '#8B5A2B',
+  2: '#2E8B57',
+  3: '#4169E1',
+};
 
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -40,6 +49,8 @@ export function SimulationScene({
   mode,
   currentChallenge,
   challengeTimeRemaining,
+  challengeStaminaRemaining,
+  staminaEfficiency,
   onStart,
   onPause,
   onResume,
@@ -56,6 +67,11 @@ export function SimulationScene({
   const progressPercentage = currentChallenge
     ? Math.min(100, (state.accumulatedYield / currentChallenge.targetYield) * 100)
     : 0;
+  const staminaPercentage = currentChallenge?.type === 'staminaLimit' && currentChallenge.staminaLimit
+    ? Math.max(0, Math.min(100, (challengeStaminaRemaining / currentChallenge.staminaLimit) * 100))
+    : 0;
+
+  const isStaminaChallenge = currentChallenge?.type === 'staminaLimit';
 
   const challengeComplete =
     mode === 'challenge' &&
@@ -65,6 +81,11 @@ export function SimulationScene({
 
   const challengeSuccess =
     currentChallenge && state.accumulatedYield >= currentChallenge.targetYield;
+
+  const participantCount = params.multiPerson?.participantCount || 1;
+  const cooperationStrategy = params.multiPerson?.cooperationStrategy || 'synchronized';
+  const steppers = params.multiPerson?.steppers || [];
+  const stepperStates = state.stepperStates || [];
 
   return (
     <Card padding="lg" radius="md" h="100%">
@@ -76,6 +97,12 @@ export function SimulationScene({
             </Text>
             <Badge color={mode === 'free' ? 'wood' : 'bamboo'} variant="light">
               {mode === 'free' ? '自由实验' : '目标挑战'}
+            </Badge>
+            <Badge color={STEPPER_COLORS[participantCount] || '#8B5A2B'} variant="light">
+              <Group gap={4} style={{ display: 'inline-flex' }}>
+                <Users size={12} />
+                {participantCount}人 · {getStrategyName(cooperationStrategy)}
+              </Group>
             </Badge>
           </Group>
           <Text size="sm" c="wood.5">
@@ -89,19 +116,43 @@ export function SimulationScene({
               <Text size="sm" fw={500} c="wood.7">
                 🎯 {currentChallenge.name}: {currentChallenge.description}
               </Text>
-              <Text
-                size="sm"
-                fw={600}
-                c={challengeTimeRemaining < 30 ? 'terracotta.6' : 'wood.7'}
-              >
-                ⏱️ {formatTime(challengeTimeRemaining)}
-              </Text>
+              <Group gap="md">
+                {!isStaminaChallenge && (
+                  <Text
+                    size="sm"
+                    fw={600}
+                    c={challengeTimeRemaining < 30 ? 'terracotta.6' : 'wood.7'}
+                  >
+                    ⏱️ {formatTime(challengeTimeRemaining)}
+                  </Text>
+                )}
+                {isStaminaChallenge && (
+                  <Text
+                    size="sm"
+                    fw={600}
+                    c={staminaPercentage < 20 ? 'terracotta.6' : '#CD5C5C'}
+                  >
+                    <Group gap={4} style={{ display: 'inline-flex' }}>
+                      <Heart size={14} />
+                      {challengeStaminaRemaining.toFixed(0)}/{currentChallenge.staminaLimit}
+                    </Group>
+                  </Text>
+                )}
+              </Group>
             </Group>
             <Progress
               value={progressPercentage}
               color={challengeSuccess ? 'bamboo' : 'wood'}
               size="sm"
             />
+            {isStaminaChallenge && (
+              <Progress
+                value={staminaPercentage}
+                color={staminaPercentage < 20 ? 'terracotta' : 'red'}
+                size="xs"
+                mt="xs"
+              />
+            )}
             <Group justify="space-between" mt="xs">
               <Text size="xs" c="wood.5">
                 当前产量: {state.accumulatedYield.toFixed(2)} kg
@@ -109,7 +160,109 @@ export function SimulationScene({
               <Text size="xs" c="wood.5">
                 目标: {currentChallenge.targetYield} kg
               </Text>
+              {isStaminaChallenge && (
+                <Text size="xs" c="wood.5">
+                  消耗体力: {state.totalStaminaUsed?.toFixed(0) || 0}
+                </Text>
+              )}
             </Group>
+          </Box>
+        )}
+
+        {participantCount > 1 && (
+          <Box
+            p="sm"
+            style={{
+              backgroundColor: '#FBF5E6',
+              borderRadius: '8px',
+              border: '1px solid #E8D4A8',
+            }}
+          >
+            <Group mb="xs" justify="space-between">
+              <Group gap="xs">
+                <Activity size={14} color="#8B5A2B" />
+                <Text size="xs" fw={500} c="wood.7">
+                  踩踏者状态
+                </Text>
+              </Group>
+              <Text size="xs" fw={500} c="#4169E1">
+                体力效率: {staminaEfficiency.toFixed(1)}
+              </Text>
+            </Group>
+            <Group grow>
+              {steppers.slice(0, participantCount).map((sp, idx) => {
+                const ss = stepperStates[idx];
+                const staminaPct = ss ? Math.max(0, Math.min(100, (ss.currentStamina / ss.maxStamina) * 100)) : 100;
+                const stepsInLastInterval = ss?.totalSteps || 0;
+                const isActive = state.isRunning && stepsInLastInterval > 0;
+                return (
+                  <Box key={sp.id}>
+                    <Group justify="space-between" mb={4}>
+                      <Text
+                        size="xs"
+                        fw={600}
+                        c={STEPPER_COLORS[idx + 1] || '#8B5A2B'}
+                      >
+                        {sp.name}{isActive ? ' 💪' : ''}
+                      </Text>
+                      <Text size="xs" c="wood.5">
+                        {ss?.currentStamina.toFixed(0) || 100}
+                      </Text>
+                    </Group>
+                    <Progress
+                      value={staminaPct}
+                      color={staminaPct < 30 ? 'terracotta' : STEPPER_COLORS[idx + 1] || '#8B5A2B'}
+                      size="xs"
+                    />
+                    <Group justify="space-between" mt={4}>
+                      <Text size="xs" c="wood.4">
+                        {sp.stepFrequency.toFixed(1)}Hz
+                      </Text>
+                      <Text size="xs" c="wood.4">
+                        ×{sp.forceMultiplier.toFixed(1)}
+                      </Text>
+                    </Group>
+                  </Box>
+                );
+              })}
+            </Group>
+          </Box>
+        )}
+
+        {participantCount === 1 && (
+          <Box
+            p="sm"
+            style={{
+              backgroundColor: '#FFF5EB',
+              borderRadius: '8px',
+              border: '1px solid #FFD4A8',
+            }}
+          >
+            <Group justify="space-between" align="center">
+              <Group gap="xs">
+                <Heart size={14} color="#CD5C5C" />
+                <Text size="xs" fw={500} c="terracotta.7">
+                  体力状态
+                </Text>
+              </Group>
+              <Group gap="md">
+                <Text size="xs" fw={600} c="wood.7">
+                  剩余: {stepperStates[0]?.currentStamina.toFixed(0) || 100}/100
+                </Text>
+                <Text size="xs" c="wood.5">
+                  已消耗: {state.totalStaminaUsed?.toFixed(0) || 0}
+                </Text>
+                <Text size="xs" fw={600} c="#4169E1">
+                  效率: {staminaEfficiency.toFixed(1)}
+                </Text>
+              </Group>
+            </Group>
+            <Progress
+              value={stepperStates[0]?.currentStamina || 100}
+              color={(stepperStates[0]?.currentStamina || 100) < 30 ? 'terracotta' : 'bamboo'}
+              size="xs"
+              mt="xs"
+            />
           </Box>
         )}
 
@@ -124,15 +277,27 @@ export function SimulationScene({
           >
             <Group justify="space-between">
               <Text size="md" fw={600} c={challengeSuccess ? 'bamboo.7' : 'terracotta.7'}>
-                {challengeSuccess ? '🎉 挑战成功！' : '⏰ 时间到'}
+                {challengeSuccess ? '🎉 挑战成功！' : isStaminaChallenge ? '❤️ 体力耗尽' : '⏰ 时间到'}
               </Text>
-              <Text size="sm" c="wood.6">
-                最终产量: {state.accumulatedYield.toFixed(2)} kg
-              </Text>
+              <Group gap="md">
+                <Text size="sm" c="wood.6">
+                  最终产量: {state.accumulatedYield.toFixed(2)} kg
+                </Text>
+                {isStaminaChallenge && (
+                  <Text size="sm" c="terracotta.6">
+                    消耗体力: {state.totalStaminaUsed?.toFixed(0) || 0}
+                  </Text>
+                )}
+              </Group>
             </Group>
             {!challengeSuccess && currentChallenge && (
               <Text size="xs" c="wood.5" mt="xs">
                 💡 提示: {currentChallenge.hint}
+              </Text>
+            )}
+            {challengeSuccess && participantCount > 1 && (
+              <Text size="xs" c="bamboo.6" mt="xs">
+                🏆 多人协同效率优异！体力效率: {staminaEfficiency.toFixed(1)}
               </Text>
             )}
           </Box>

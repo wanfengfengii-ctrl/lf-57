@@ -1,23 +1,37 @@
 import { useEffect, useRef, useCallback } from 'react';
 import Matter from 'matter-js';
-import type { SimulationParams } from '../types';
+import type { SimulationParams, StepperState } from '../types';
 import {
   DEFAULT_PHYSICS_CONFIG,
   generateStepForce,
+  generateCompositeForce,
   isEffectiveStrike,
   calculateImpactEnergy,
   calculateHuskRemovalRate,
   getLeverageMultiplier,
+  updateStepperStamina,
 } from '../utils/physics';
+
+export interface StrikeData {
+  isEffective: boolean;
+  huskRate: number;
+  contributingSteppers: number[];
+  perStepperDelta: {
+    id: number;
+    steps: number;
+    stamina: number;
+  }[];
+}
 
 interface UseMatterEngineOptions {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   params: SimulationParams;
   isRunning: boolean;
   isPaused: boolean;
-  onStrike: (isEffective: boolean, huskRate: number) => void;
+  stepperStates: StepperState[];
+  onStrike: (data: StrikeData) => void;
   onHeightUpdate: (currentHeight: number, maxHeight: number) => void;
-  onPhysicsTick: (deltaTime: number) => void;
+  onPhysicsTick: (deltaTime: number, perStepperForce: number[]) => void;
 }
 
 interface MatterObjects {
@@ -34,6 +48,7 @@ interface MatterObjects {
   rodToPestleConstraint: Matter.Constraint;
   pestleGuideTop: Matter.Body;
   pestleGuideBottom: Matter.Body;
+  stepperIndicators: Matter.Body[];
 }
 
 const SCALE = DEFAULT_PHYSICS_CONFIG.SCALE;
@@ -49,6 +64,7 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
     params,
     isRunning,
     isPaused,
+    stepperStates,
     onStrike,
     onHeightUpdate,
     onPhysicsTick,
@@ -67,6 +83,9 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
   const paramsRef = useRef<SimulationParams>(params);
   const isRunningRef = useRef<boolean>(isRunning);
   const isPausedRef = useRef<boolean>(isPaused);
+  const stepperStatesRef = useRef<StepperState[]>(stepperStates);
+  const stepperStepCountRef = useRef<number[]>([]);
+  const stepperForceAccumRef = useRef<number[]>([]);
 
   useEffect(() => {
     paramsRef.current = params;
@@ -76,6 +95,10 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
     isRunningRef.current = isRunning;
     isPausedRef.current = isPaused;
   }, [isRunning, isPaused]);
+
+  useEffect(() => {
+    stepperStatesRef.current = stepperStates;
+  }, [stepperStates]);
 
   const createObjects = useCallback(
     (engine: Matter.Engine, currentParams: SimulationParams): MatterObjects => {
@@ -198,6 +221,20 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
         label: 'pestleGuideBottom',
       });
 
+      const stepperIndicators: Matter.Body[] = [];
+      const stepperCount = currentParams.multiPerson?.participantCount || 1;
+      for (let i = 0; i < stepperCount; i++) {
+        const stepperColor = currentParams.multiPerson?.steppers[i]?.color || '#8B5A2B';
+        const indicatorX = pivotX - pedalHalfLength + (pedalHalfLength / stepperCount) * i + 15;
+        const indicator = Bodies.circle(indicatorX, PIVOT_Y - 30, 6, {
+          isStatic: true,
+          isSensor: true,
+          render: { fillStyle: stepperColor },
+          label: `stepper_${i}`,
+        });
+        stepperIndicators.push(indicator);
+      }
+
       const pivotConstraint = Constraint.create({
         bodyA: pedal,
         pointA: {
@@ -244,6 +281,7 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
         mortar,
         pestleGuideTop,
         pestleGuideBottom,
+        ...stepperIndicators,
       ];
 
       const allConstraints = [
@@ -269,6 +307,7 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
         rodToPestleConstraint,
         pestleGuideTop,
         pestleGuideBottom,
+        stepperIndicators,
       };
     },
     []
@@ -284,6 +323,10 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
     lastPestleYRef.current = PESTLE_REST_Y;
     strikeCountRef.current = 0;
     simulationTimeRef.current = 0;
+
+    const stepperCount = paramsRef.current.multiPerson?.participantCount || 1;
+    stepperStepCountRef.current = new Array(stepperCount).fill(0);
+    stepperForceAccumRef.current = new Array(stepperCount).fill(0);
   }, [createObjects]);
 
   useEffect(() => {
@@ -325,16 +368,39 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
 
       const { pedal } = objectsRef.current;
       const currentParams = paramsRef.current;
+      const mp = currentParams.multiPerson;
+      const currentStepperStates = stepperStatesRef.current;
 
       simulationTimeRef.current += 1 / 60;
 
-      const force = generateStepForce(
-        simulationTimeRef.current,
-        currentParams.stepFrequency
-      );
+      let totalForce = 0;
+      let perStepperForce: number[] = [];
+
+      if (mp && mp.steppers.length > 0) {
+        const composite = generateCompositeForce(
+          simulationTimeRef.current,
+          mp.steppers,
+          currentStepperStates
+        );
+        totalForce = composite.totalForce;
+        perStepperForce = composite.perStepperForce;
+
+        perStepperForce.forEach((f, i) => {
+          stepperForceAccumRef.current[i] = (stepperForceAccumRef.current[i] || 0) + f;
+          if (f > DEFAULT_PHYSICS_CONFIG.MAX_STEP_FORCE * 0.1) {
+            stepperStepCountRef.current[i] = (stepperStepCountRef.current[i] || 0) + 1 / 60;
+          }
+        });
+      } else {
+        totalForce = generateStepForce(
+          simulationTimeRef.current,
+          currentParams.stepFrequency
+        );
+        perStepperForce = [totalForce];
+      }
 
       const forceX = 0;
-      const forceY = -force / 10000;
+      const forceY = -totalForce / 10000;
 
       const pedalLeftX =
         -currentParams.pedalLength * SCALE / 2 + currentParams.pivotPosition * SCALE * 0.1;
@@ -345,7 +411,7 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
     Events.on(engine, 'afterUpdate', () => {
       if (!objectsRef.current) return;
 
-      const { pestle } = objectsRef.current;
+      const { pestle, stepperIndicators } = objectsRef.current;
       const currentHeight = Math.max(0, (PESTLE_REST_Y - pestle.position.y) / SCALE);
 
       if (currentHeight > maxHeightRef.current) {
@@ -353,6 +419,32 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
       }
 
       onHeightUpdate(currentHeight, maxHeightRef.current);
+
+      const currentParams = paramsRef.current;
+      const mp = currentParams.multiPerson;
+      let currentActive: boolean[] = [];
+      if (mp && mp.steppers.length > 0) {
+        const composite = generateCompositeForce(
+          simulationTimeRef.current,
+          mp.steppers,
+          stepperStatesRef.current
+        );
+        currentActive = mp.steppers.map((s, i) => composite.activeSteppers.includes(s.id));
+      }
+
+      stepperIndicators.forEach((indicator, i) => {
+        if (currentActive[i]) {
+          Matter.Body.setPosition(indicator, {
+            x: indicator.position.x,
+            y: PIVOT_Y - 45,
+          });
+        } else {
+          Matter.Body.setPosition(indicator, {
+            x: indicator.position.x,
+            y: PIVOT_Y - 30,
+          });
+        }
+      });
 
       const wasAbove = lastPestleYRef.current < PESTLE_REST_Y - 5;
       const isNowBelow = pestle.position.y >= PESTLE_REST_Y - 5;
@@ -364,14 +456,68 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
 
         const effective = isEffectiveStrike(impactVelocity, dropHeight);
         const impactEnergy = calculateImpactEnergy(impactVelocity);
+        const participantCount = mp?.participantCount || 1;
         const huskRate = calculateHuskRemovalRate(
           impactEnergy,
           paramsRef.current.grainWeight,
-          strikeCountRef.current + 1
+          strikeCountRef.current + 1,
+          participantCount
         );
 
+        const contributingSteppers: number[] = [];
+        const perStepperDelta: { id: number; steps: number; stamina: number }[] = [];
+
+        if (mp && mp.steppers.length > 0) {
+          const composite = generateCompositeForce(
+            simulationTimeRef.current,
+            mp.steppers,
+            stepperStatesRef.current
+          );
+          contributingSteppers.push(...composite.activeSteppers);
+
+          mp.steppers.forEach((stepper, i) => {
+            const currentState = stepperStatesRef.current[i] || {
+              id: stepper.id,
+              currentStamina: 100,
+              maxStamina: 100,
+              totalSteps: 0,
+              effectiveContributions: 0,
+              staminaHistory: [],
+            };
+            const updatedState = updateStepperStamina(
+              stepper,
+              currentState,
+              1 / 60,
+              composite.perStepperForce[i] || 0,
+              true,
+              effective
+            );
+
+            const stepsDelta = Math.floor(stepperStepCountRef.current[i] || 0);
+            stepperStepCountRef.current[i] = 0;
+
+            perStepperDelta.push({
+              id: stepper.id,
+              steps: stepsDelta,
+              stamina: updatedState.currentStamina,
+            });
+          });
+        } else {
+          perStepperDelta.push({
+            id: 0,
+            steps: 1,
+            stamina: 100,
+          });
+          contributingSteppers.push(0);
+        }
+
         strikeCountRef.current++;
-        onStrike(effective, huskRate);
+        onStrike({
+          isEffective: effective,
+          huskRate,
+          contributingSteppers,
+          perStepperDelta,
+        });
 
         strikeCooldownRef.current = true;
         setTimeout(() => {
@@ -382,7 +528,15 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
       }
 
       lastPestleYRef.current = pestle.position.y;
-      onPhysicsTick(1 / 60);
+
+      const mp2 = paramsRef.current.multiPerson;
+      let perStepperForceTick: number[] = [];
+      if (mp2 && mp2.steppers.length > 0) {
+        perStepperForceTick = mp2.steppers.map((s, i) => stepperForceAccumRef.current[i] || 0);
+        stepperForceAccumRef.current = new Array(mp2.steppers.length).fill(0);
+      }
+
+      onPhysicsTick(1 / 60, perStepperForceTick);
     });
 
     Render.run(render);
@@ -395,15 +549,22 @@ export function useMatterEngine(options: UseMatterEngineOptions) {
       Runner.stop(runner);
       Matter.Composite.clear(engine.world, false);
       Engine.clear(engine);
-      render.canvas.remove();
+      const ctx = render.canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, render.canvas.width, render.canvas.height);
+      }
     };
-  }, [canvasRef, createObjects, onStrike, onHeightUpdate, onPhysicsTick, params]);
+  }, [canvasRef, createObjects, onStrike, onHeightUpdate, onPhysicsTick]);
 
   useEffect(() => {
     if (isRunning && !isPaused) {
       simulationTimeRef.current = 0;
       maxHeightRef.current = 0;
       strikeCountRef.current = 0;
+
+      const stepperCount = paramsRef.current.multiPerson?.participantCount || 1;
+      stepperStepCountRef.current = new Array(stepperCount).fill(0);
+      stepperForceAccumRef.current = new Array(stepperCount).fill(0);
     }
   }, [isRunning]);
 

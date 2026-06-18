@@ -33,8 +33,10 @@ export function SimulationPage() {
     mode,
     currentChallenge,
     challengeTimeRemaining,
+    challengeStaminaRemaining,
     effectiveRate,
     yieldPerHour,
+    staminaEfficiency,
     canvasWidth,
     canvasHeight,
     setParams,
@@ -47,6 +49,10 @@ export function SimulationPage() {
     setChallenge,
     saveCurrentRecord,
     getValidationErrors,
+    setParticipantCount,
+    setCooperationStrategy,
+    updateStepper,
+    setTotalStaminaBudget,
   } = useSimulation(canvasRef);
 
   const errors = getValidationErrors();
@@ -96,7 +102,13 @@ export function SimulationPage() {
           <Grid.Col span={{ base: 12, md: 3 }}>
             <ControlPanel
               params={params}
+              stepperStates={state.stepperStates || []}
               onChange={setParams}
+              onParticipantCountChange={setParticipantCount}
+              onStrategyChange={setCooperationStrategy}
+              onStepperChange={updateStepper}
+              onStaminaBudgetChange={setTotalStaminaBudget}
+              totalStaminaUsed={state.totalStaminaUsed || 0}
               errors={errors}
               disabled={state.isRunning && !state.isPaused}
             />
@@ -126,6 +138,8 @@ export function SimulationPage() {
               mode={mode}
               currentChallenge={currentChallenge}
               challengeTimeRemaining={challengeTimeRemaining}
+              challengeStaminaRemaining={challengeStaminaRemaining}
+              staminaEfficiency={staminaEfficiency}
               onStart={start}
               onPause={pause}
               onResume={resume}
@@ -157,6 +171,10 @@ export function SimulationPage() {
                   state={state}
                   effectiveRate={effectiveRate}
                   yieldPerHour={yieldPerHour}
+                  staminaEfficiency={staminaEfficiency}
+                  participantCount={params.multiPerson?.participantCount || 1}
+                  cooperationStrategy={params.multiPerson?.cooperationStrategy || 'synchronized'}
+                  allRecords={records}
                 />
               </Tabs.Panel>
 
