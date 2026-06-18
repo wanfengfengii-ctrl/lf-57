@@ -13,6 +13,7 @@ import {
   AreaChart,
   Area,
   ComposedChart,
+  Cell,
 } from 'recharts';
 import type { EfficiencyPoint, SimulationState } from '../types';
 import { calculateEffectiveRate } from '../utils/physics';
@@ -171,7 +172,7 @@ export function StatsPanel({
                     />
                     <Bar dataKey="value" name="次数" radius={[4, 4, 0, 0]}>
                       {strikeData.map((entry, index) => (
-                        <rect key={index} fill={entry.color} />
+                        <Cell key={index} fill={entry.color} />
                       ))}
                     </Bar>
                   </BarChart>

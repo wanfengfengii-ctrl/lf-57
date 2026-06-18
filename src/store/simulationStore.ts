@@ -250,11 +250,21 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   loadRecord: (id: string) => {
     const record = get().records.find((r) => r.id === id);
     if (record) {
+      const avgHuskRate = record.effectiveStrikes > 0
+        ? (record.finalYield / (record.effectiveStrikes * record.params.grainWeight * 0.1 * 0.7))
+        : 0;
+
       set({
         params: { ...record.params },
         state: {
           ...getInitialState(),
+          elapsedTime: record.duration,
+          totalStrikes: record.totalStrikes,
+          effectiveStrikes: record.effectiveStrikes,
+          accumulatedYield: record.finalYield,
           maxHeight: record.maxHeight,
+          currentHuskRate: Math.max(0, Math.min(1, avgHuskRate)),
+          efficiencyHistory: record.efficiencyHistory ? [...record.efficiencyHistory] : [],
         },
         mode: record.mode,
       });

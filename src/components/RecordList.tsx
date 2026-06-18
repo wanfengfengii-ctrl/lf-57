@@ -9,8 +9,22 @@ import {
   ScrollArea,
   Modal,
   Button,
+  Tabs,
 } from '@mantine/core';
-import { Trash2, Download, Play, X, History } from 'lucide-react';
+import { Trash2, Play, History } from 'lucide-react';
+import {
+  ComposedChart,
+  Area,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
 import type { ExperimentRecord } from '../types';
 
 interface RecordListProps {
@@ -280,6 +294,104 @@ export function RecordList({ records, onLoad, onDelete }: RecordListProps) {
                 </Box>
               </Group>
             </Box>
+
+            {selectedRecord.efficiencyHistory && selectedRecord.efficiencyHistory.length > 0 && (
+              <Box p="md" style={{ backgroundColor: '#FBF5E6', borderRadius: '8px' }}>
+                <Text size="sm" fw={500} c="wood.7" mb="sm">
+                  📈 效率曲线
+                </Text>
+                <Tabs defaultValue="efficiency" variant="pills">
+                  <Tabs.List grow mb="sm">
+                    <Tabs.Tab value="efficiency">效率曲线</Tabs.Tab>
+                    <Tabs.Tab value="strikes">冲击统计</Tabs.Tab>
+                    <Tabs.Tab value="yield">产量趋势</Tabs.Tab>
+                  </Tabs.List>
+
+                  <Tabs.Panel value="efficiency">
+                    <Box h={180}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={selectedRecord.efficiencyHistory} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                          <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                          <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#8B5A2B' }} domain={[0, 100]} />
+                          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px' }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '10px' }} />
+                          <Area
+                            yAxisId="left"
+                            type="monotone"
+                            dataKey="effectiveRate"
+                            name="有效冲击率(%)"
+                            fill="#2E8B5733"
+                            stroke="#2E8B57"
+                            strokeWidth={2}
+                          />
+                          <Line
+                            yAxisId="right"
+                            type="monotone"
+                            dataKey="yieldPerHour"
+                            name="时产量(kg/h)"
+                            stroke="#8B5A2B"
+                            strokeWidth={2}
+                            dot={{ r: 2 }}
+                          />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  </Tabs.Panel>
+
+                  <Tabs.Panel value="strikes">
+                    <Box h={180}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={selectedRecord.efficiencyHistory} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                          <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                          <YAxis tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px' }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '10px' }} />
+                          <Bar dataKey="totalStrikes" name="总舂击" fill="#8B5A2B" radius={[2, 2, 0, 0]} />
+                          <Bar dataKey="effectiveStrikes" name="有效冲击" fill="#2E8B57" radius={[2, 2, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  </Tabs.Panel>
+
+                  <Tabs.Panel value="yield">
+                    <Box h={180}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart
+                          data={selectedRecord.efficiencyHistory.map((p) => ({
+                            ...p,
+                            累计产量: (p.yieldPerHour * p.time) / 3600,
+                          }))}
+                          margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E8D4A8" />
+                          <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                          <YAxis tick={{ fontSize: 10, fill: '#8B5A2B' }} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#FBF5E6', border: '1px solid #D4B88C', borderRadius: '6px' }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '10px' }} />
+                          <Area
+                            type="monotone"
+                            dataKey="累计产量"
+                            name="累计产量(kg)"
+                            fill="#8B5A2B33"
+                            stroke="#8B5A2B"
+                            strokeWidth={2}
+                          />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  </Tabs.Panel>
+                </Tabs>
+              </Box>
+            )}
 
             <Group justify="flex-end">
               <button
