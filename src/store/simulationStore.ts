@@ -322,12 +322,26 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 
   setChallenge: (challenge) => {
-    const { params } = get();
+    const current = get();
+    let updatedParams = current.params;
+
+    if (challenge && challenge.type === 'staminaLimit' && challenge.staminaLimit) {
+      const mp = updatedParams.multiPerson || getDefaultMultiPersonParams(1, 'alternating');
+      updatedParams = {
+        ...updatedParams,
+        multiPerson: {
+          ...mp,
+          totalStaminaBudget: challenge.staminaLimit,
+        },
+      };
+    }
+
     set({
       currentChallenge: challenge,
       challengeTimeRemaining: challenge?.timeLimit || 0,
       challengeStaminaRemaining: challenge?.staminaLimit || 0,
-      state: getInitialState(params),
+      params: updatedParams,
+      state: getInitialState(updatedParams),
     });
   },
 
@@ -430,6 +444,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
         totalStaminaUsed: newTotalStaminaUsed,
         staminaBudgetRemaining: Math.max(0, budgetRemaining),
       },
+      challengeStaminaRemaining: Math.max(0, budgetRemaining),
     }));
   },
 

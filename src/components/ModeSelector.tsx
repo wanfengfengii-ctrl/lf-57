@@ -179,9 +179,6 @@ export function ModeSelector({
                     <Text size="xs" c="wood.5">
                       {challenge.description}
                     </Text>
-                    <Text size="xs" c="wood.4" mt={4} style={{ fontStyle: 'italic' }}>
-                      💡 {challenge.hint}
-                    </Text>
                   </Stack>
                   <Stack gap={4} align="flex-end">
                     <Group gap={4}>

@@ -68,7 +68,7 @@ export function SimulationScene({
     ? Math.min(100, (state.accumulatedYield / currentChallenge.targetYield) * 100)
     : 0;
   const staminaPercentage = currentChallenge?.type === 'staminaLimit' && currentChallenge.staminaLimit
-    ? Math.max(0, Math.min(100, (challengeStaminaRemaining / currentChallenge.staminaLimit) * 100))
+    ? Math.max(0, Math.min(100, (state.staminaBudgetRemaining / currentChallenge.staminaLimit) * 100))
     : 0;
 
   const isStaminaChallenge = currentChallenge?.type === 'staminaLimit';
@@ -134,7 +134,7 @@ export function SimulationScene({
                   >
                     <Group gap={4} style={{ display: 'inline-flex' }}>
                       <Heart size={14} />
-                      {challengeStaminaRemaining.toFixed(0)}/{currentChallenge.staminaLimit}
+                      {state.staminaBudgetRemaining.toFixed(0)}/{currentChallenge.staminaLimit}
                     </Group>
                   </Text>
                 )}
@@ -247,7 +247,7 @@ export function SimulationScene({
               </Group>
               <Group gap="md">
                 <Text size="xs" fw={600} c="wood.7">
-                  剩余: {stepperStates[0]?.currentStamina.toFixed(0) || 100}/100
+                  剩余: {stepperStates[0]?.currentStamina.toFixed(0) || 100}/{stepperStates[0]?.maxStamina.toFixed(0) || 100}
                 </Text>
                 <Text size="xs" c="wood.5">
                   已消耗: {state.totalStaminaUsed?.toFixed(0) || 0}
@@ -258,8 +258,8 @@ export function SimulationScene({
               </Group>
             </Group>
             <Progress
-              value={stepperStates[0]?.currentStamina || 100}
-              color={(stepperStates[0]?.currentStamina || 100) < 30 ? 'terracotta' : 'bamboo'}
+              value={stepperStates[0] ? (stepperStates[0].currentStamina / stepperStates[0].maxStamina) * 100 : 100}
+              color={stepperStates[0] && (stepperStates[0].currentStamina / stepperStates[0].maxStamina) * 100 < 30 ? 'terracotta' : 'bamboo'}
               size="xs"
               mt="xs"
             />
@@ -290,11 +290,6 @@ export function SimulationScene({
                 )}
               </Group>
             </Group>
-            {!challengeSuccess && currentChallenge && (
-              <Text size="xs" c="wood.5" mt="xs">
-                💡 提示: {currentChallenge.hint}
-              </Text>
-            )}
             {challengeSuccess && participantCount > 1 && (
               <Text size="xs" c="bamboo.6" mt="xs">
                 🏆 多人协同效率优异！体力效率: {staminaEfficiency.toFixed(1)}
